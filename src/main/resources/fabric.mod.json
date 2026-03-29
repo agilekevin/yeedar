@@ -1,0 +1,21 @@
+{
+    "schemaVersion": 1,
+    "id": "yeedar",
+    "version": "${version}",
+    "name": "Yeedar",
+    "description": "Client-side player tracker with Discord webhook integration for EdenMc",
+    "authors": ["zipwow"],
+    "contact": {},
+    "license": "MIT",
+    "icon": "assets/yeedar/icon.png",
+    "environment": "client",
+    "entrypoints": {
+        "client": ["com.yeedar.YeedarClient"]
+    },
+    "depends": {
+        "fabricloader": ">=0.16.0",
+        "fabric-api": ">=0.136.1",
+        "minecraft": "~1.21.8",
+        "java": ">=21"
+    }
+}
