@@ -49,7 +49,8 @@ public class PlayerTracker {
         double rangeSq = range * range;
 
         Set<String> currentPlayers = new HashSet<>();
-        Map<String, double[]> currentPositions = new HashMap<>();
+        // Store observer's position (not the detected player's)
+        double[] myPos = new double[]{client.player.getX(), client.player.getY(), client.player.getZ()};
 
         for (AbstractClientPlayerEntity player : client.world.getPlayers()) {
             if (player == client.player) continue;
@@ -57,22 +58,20 @@ public class PlayerTracker {
                 String name = player.getName().getString();
                 if (FriendlyTracker.getInstance().isFriendly(name)) continue;
                 currentPlayers.add(name);
-                currentPositions.put(name, new double[]{player.getX(), player.getY(), player.getZ()});
             }
         }
 
         // Players who just entered range
         for (String name : currentPlayers) {
             if (!trackedPlayers.contains(name)) {
-                double[] pos = currentPositions.get(name);
-                YeetVisClient.sendPlayerEvent(name, pos[0], pos[1], pos[2], true);
+                YeetVisClient.sendPlayerEvent(name, myPos[0], myPos[1], myPos[2], true);
             }
         }
 
         // Players who just left range
         for (String name : trackedPlayers) {
             if (!currentPlayers.contains(name)) {
-                double[] pos = lastKnownPositions.getOrDefault(name, new double[]{0, 0, 0});
+                double[] pos = lastKnownPositions.getOrDefault(name, myPos);
                 YeetVisClient.sendPlayerEvent(name, pos[0], pos[1], pos[2], false);
             }
         }
@@ -80,7 +79,9 @@ public class PlayerTracker {
         trackedPlayers.clear();
         trackedPlayers.addAll(currentPlayers);
         lastKnownPositions.clear();
-        lastKnownPositions.putAll(currentPositions);
+        for (String name : currentPlayers) {
+            lastKnownPositions.put(name, myPos);
+        }
     }
 
     public Set<String> getTrackedPlayers() {

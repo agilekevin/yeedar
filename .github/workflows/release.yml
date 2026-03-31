@@ -36,3 +36,8 @@ jobs:
         with:
           files: build/libs/yeedar-${{ steps.version.outputs.version }}.jar
           generate_release_notes: true
+
+      - name: Publish to Modrinth
+        env:
+          MODRINTH_TOKEN: ${{ secrets.MODRINTH_TOKEN }}
+        run: ./gradlew modrinth

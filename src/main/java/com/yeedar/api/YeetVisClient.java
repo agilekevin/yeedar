@@ -41,7 +41,7 @@ public class YeetVisClient {
         payload.put("snitch_name", "yeedar-" + (entered ? "enter" : "leave"));
         payload.put("group", "yeedar");
         String reporter = config.getUsername().isEmpty() ? "unknown" : config.getUsername();
-        payload.put("raw", String.format("[Yeedar/%s] %s %s range at %.1f, %.1f, %.1f",
+        payload.put("raw", String.format("[Yeedar/%s] %s %s range (observer at %.1f, %.1f, %.1f)",
                 reporter, playerName, entered ? "entered" : "left", x, y, z));
 
         String json = GSON.toJson(payload);
