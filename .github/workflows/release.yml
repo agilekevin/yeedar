@@ -38,6 +38,8 @@ jobs:
           generate_release_notes: true
 
       - name: Publish to Modrinth
+        if: env.MODRINTH_TOKEN != ''
+        continue-on-error: true
         env:
           MODRINTH_TOKEN: ${{ secrets.MODRINTH_TOKEN }}
         run: ./gradlew modrinth
