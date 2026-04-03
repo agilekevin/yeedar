@@ -10,8 +10,9 @@ cd "$(dirname "$0")"
 echo "Removing old Yeedar JARs..."
 rm -f "$MODS_DIR"/yeedar-*.jar
 
-echo "Copying new JAR..."
-cp build/libs/yeedar-*.jar "$MODS_DIR/"
+VERSION=$(grep '^mod_version=' gradle.properties | cut -d= -f2)
+echo "Copying yeedar-${VERSION}.jar..."
+cp "build/libs/yeedar-${VERSION}.jar" "$MODS_DIR/"
 
 echo "Done! Restart Minecraft to load the new version."
 ls -la "$MODS_DIR"/yeedar-*.jar
