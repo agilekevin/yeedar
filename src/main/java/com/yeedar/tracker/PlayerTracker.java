@@ -56,7 +56,6 @@ public class PlayerTracker {
             if (player == client.player) continue;
             if (client.player.squaredDistanceTo(player) <= rangeSq) {
                 String name = player.getName().getString();
-                if (FriendlyTracker.getInstance().isFriendly(name)) continue;
                 currentPlayers.add(name);
             }
         }
@@ -64,7 +63,8 @@ public class PlayerTracker {
         // Players who just entered range
         for (String name : currentPlayers) {
             if (!trackedPlayers.contains(name)) {
-                YeetVisClient.sendPlayerEvent(name, myPos[0], myPos[1], myPos[2], true);
+                boolean friendly = FriendlyTracker.getInstance().isFriendly(name);
+                YeetVisClient.sendPlayerEvent(name, myPos[0], myPos[1], myPos[2], true, friendly);
             }
         }
 
@@ -72,7 +72,8 @@ public class PlayerTracker {
         for (String name : trackedPlayers) {
             if (!currentPlayers.contains(name)) {
                 double[] pos = lastKnownPositions.getOrDefault(name, myPos);
-                YeetVisClient.sendPlayerEvent(name, pos[0], pos[1], pos[2], false);
+                boolean friendly = FriendlyTracker.getInstance().isFriendly(name);
+                YeetVisClient.sendPlayerEvent(name, pos[0], pos[1], pos[2], false, friendly);
             }
         }
 

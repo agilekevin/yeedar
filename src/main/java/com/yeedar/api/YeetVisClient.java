@@ -19,7 +19,7 @@ public class YeetVisClient {
     private static final int MAX_MESSAGES_PER_WINDOW = 5;
     private static final long WINDOW_MS = 10_000;
 
-    public static void sendPlayerEvent(String playerName, double x, double y, double z, boolean entered) {
+    public static void sendPlayerEvent(String playerName, double x, double y, double z, boolean entered, boolean friendly) {
         YeedarConfig config = YeedarConfig.getInstance();
         String baseUrl = config.getApiBaseUrl();
         String token = config.getToken();
@@ -39,7 +39,7 @@ public class YeetVisClient {
         payload.put("z", (int) z);
         payload.put("world", "overworld");
         payload.put("snitch_name", "yeedar-" + (entered ? "enter" : "leave"));
-        payload.put("group", "yeedar");
+        payload.put("group", friendly ? "yeedar-known" : "yeedar-unknown");
         String reporter = config.getUsername().isEmpty() ? "unknown" : config.getUsername();
         payload.put("raw", String.format("[Yeedar/%s] %s %s range (observer at %.1f, %.1f, %.1f)",
                 reporter, playerName, entered ? "entered" : "left", x, y, z));
