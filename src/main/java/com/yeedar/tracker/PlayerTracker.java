@@ -56,6 +56,7 @@ public class PlayerTracker {
             if (player == client.player) continue;
             if (client.player.squaredDistanceTo(player) <= rangeSq) {
                 String name = player.getName().getString();
+                if (YeedarConfig.getInstance().isIgnored(name)) continue;
                 currentPlayers.add(name);
             }
         }

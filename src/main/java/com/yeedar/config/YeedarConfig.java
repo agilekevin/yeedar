@@ -7,6 +7,8 @@ import net.fabricmc.loader.api.FabricLoader;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 
 public class YeedarConfig {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
@@ -18,6 +20,7 @@ public class YeedarConfig {
     private String username = "";
     private double detectionRange = 128.0;
     private boolean trackingEnabled = true;
+    private List<String> ignoredNames = new ArrayList<>(List.of("FreeCam"));
 
     public static YeedarConfig getInstance() {
         if (instance == null) {
@@ -86,6 +89,18 @@ public class YeedarConfig {
 
     public void setTrackingEnabled(boolean trackingEnabled) {
         this.trackingEnabled = trackingEnabled;
+    }
+
+    public List<String> getIgnoredNames() {
+        return ignoredNames;
+    }
+
+    public boolean isIgnored(String name) {
+        if (ignoredNames == null || name == null) return false;
+        for (String ignored : ignoredNames) {
+            if (ignored != null && ignored.equalsIgnoreCase(name)) return true;
+        }
+        return false;
     }
 
     public boolean isLoggedIn() {
