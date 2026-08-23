@@ -79,7 +79,8 @@ That's it — once logged in, tracking runs automatically while you play.
 | `/yeedar toggle` | Turn player tracking on or off. |
 | `/yeedar status` | Show tracking state, login, API URL, range, and tracked count. |
 | `/yeedar list` | List players currently in range and their positions. |
-| `/yeedar jalist` | Read the open JukeAlert `/jalist` window and upload snitch timers. |
+| `/yeedar jalist` | Scan every snitch you can see and upload their timers. |
+| `/yeedar jalist <group>` | Scan just one namelayer group (more reliable for large networks). |
 
 ## Snitch maintenance
 
@@ -94,8 +95,11 @@ dashboard's **Snitch Maintenance** layer coloured by how soon each snitch
 expires.
 
 Leave the window alone while it runs; it drives itself and takes a few seconds
-per dozen pages. If jalist is already open, `/yeedar jalist` scans that window
-instead of reopening it.
+per dozen pages.
+
+For a large snitch network, scan a group at a time — `/yeedar jalist yeet` —
+rather than everything at once. JukeAlert filters server-side, so each run has
+far fewer pages to page through, which is markedly more reliable.
 
 Yeedar does **not** touch a `/jalist` window you opened yourself — nothing
 moves unless you ask for a scan.

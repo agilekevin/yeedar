@@ -27,6 +27,16 @@ public class YeedarCommands {
                                 JalistScanner.getInstance().beginScan();
                                 return 1;
                             })
+                            .then(ClientCommandManager.argument("group", StringArgumentType.word())
+                                    .executes(ctx -> {
+                                        // /jalist <group> filters server-side, so a
+                                        // large network can be scanned a group at a
+                                        // time instead of in one long fragile run.
+                                        JalistScanner.getInstance()
+                                                .beginScan(StringArgumentType.getString(ctx, "group"));
+                                        return 1;
+                                    })
+                            )
                     )
                     .then(ClientCommandManager.literal("login")
                             .executes(ctx -> {

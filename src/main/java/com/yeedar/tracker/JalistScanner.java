@@ -103,6 +103,7 @@ public class JalistScanner {
     private int clickDelayTicks = CLICK_DELAY_MIN;
     private int waitBudget = WAIT_BASE_TICKS;
     private int screenGoneTicks = 0;
+    private String scanGroup = null;
     private int cleanStreak = 0;
     private int pages = 0;
     private String lastFingerprint = null;
@@ -133,6 +134,18 @@ public class JalistScanner {
      * explicit: nothing moves unless you asked for a scan.
      */
     public void beginScan() {
+        beginScan(null);
+    }
+
+    /**
+     * Scan one namelayer group, or everything when group is null.
+     *
+     * <p>Per-group is the more reliable route: /jalist <group> filters
+     * server-side, and a group of ~160 snitches is about four pages — well
+     * under the point where paging starts failing. It also makes a large
+     * network scannable in pieces instead of one fragile run.
+     */
+    public void beginScan(String group) {
         MinecraftClient mc = MinecraftClient.getInstance();
         if (active) {
             feedback("§eScan already running.");
@@ -148,8 +161,9 @@ public class JalistScanner {
         }
         armed = true;
         armedTicks = 0;
-        feedback("§7Running /jalist...");
-        mc.player.networkHandler.sendChatCommand("jalist");
+        scanGroup = group;
+        feedback(group == null ? "§7Running /jalist..." : "§7Running /jalist " + group + "...");
+        mc.player.networkHandler.sendChatCommand(group == null ? "jalist" : "jalist " + group);
     }
 
     /** Scan the jalist window that is already open. */
@@ -396,8 +410,21 @@ public class JalistScanner {
             finish("§cScan aborted — no interaction manager.");
             return;
         }
-        int syncId = ((HandledScreen<?>) mc.currentScreen).getScreenHandler().syncId;
-        mc.interactionManager.clickSlot(syncId, NEXT_PAGE_SLOT, 0, SlotActionType.PICKUP, mc.player);
+        var handler = ((HandledScreen<?>) mc.currentScreen).getScreenHandler();
+        // QUICK_MOVE (shift-click) rather than PICKUP. PICKUP makes the client
+        // predict lifting the arrow into the cursor; the plugin cancels the
+        // click server-side, but a phantom cursor item can survive on the
+        // client, and once the cursor is occupied a PICKUP means "place"
+        // instead of "take" — which is ignored. That matches what we saw
+        // exactly: several clicks work, then they silently stop, and pacing
+        // makes no difference. A transfer click never touches the cursor.
+        if (!handler.getCursorStack().isEmpty()) {
+            System.out.println("[Yeedar] cursor is holding "
+                    + handler.getCursorStack().getName().getString()
+                    + " — this is what stalls paging");
+        }
+        mc.interactionManager.clickSlot(handler.syncId, NEXT_PAGE_SLOT, 0,
+                SlotActionType.QUICK_MOVE, mc.player);
         awaitingPage = true;
         waitTicks = 0;
     }
