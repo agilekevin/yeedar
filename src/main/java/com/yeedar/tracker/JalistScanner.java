@@ -32,7 +32,7 @@ public class JalistScanner {
 
     private static final int NEXT_PAGE_SLOT = 53;
     /** Give the server time to send the new page before re-reading. */
-    private static final int PAGE_TIMEOUT_TICKS = 60;
+    private static final int PAGE_TIMEOUT_TICKS = 120;   // 6 seconds
     /** Stop rather than loop forever if paging never terminates. */
     private static final int MAX_PAGES = 200;
     /** Upload once this many unsent snitches have accumulated. */
@@ -42,9 +42,13 @@ public class JalistScanner {
      * second and the server simply stopped sending new ones after seven, so it
      * is throttling us. Pace the clicks instead of hammering it.
      */
-    private static final int CLICK_DELAY_TICKS = 6;
-    /** Re-click before concluding a page timeout was the end of the list. */
-    private static final int MAX_PAGE_RETRIES = 2;
+    private static final int CLICK_DELAY_TICKS = 14;   // ~700ms
+    /**
+     * Re-click at most once before concluding the list ended. Retrying is a
+     * gamble: if the original click did register and the server is merely
+     * slow, the retry advances an extra page and silently skips its contents.
+     */
+    private static final int MAX_PAGE_RETRIES = 1;
 
     /**
      * How long after the player types /jalist we keep watching for the window
@@ -182,6 +186,8 @@ public class JalistScanner {
         // not: the client removes it from the slot the moment it is clicked,
         // so it is absent from most pages even mid-list.
         if (!seenPages.add(fingerprint)) {
+            System.out.println("[Yeedar] page " + (pages + 1)
+                    + " repeats a page already read — list wrapped, stopping");
             finish(null);
             return;
         }
@@ -210,6 +216,9 @@ public class JalistScanner {
                     + " timed out; retry " + pageRetries);
             clickNextPage(mc, stacks);
         } else {
+            System.out.println("[Yeedar] page " + (pages + 1)
+                    + " never arrived after " + MAX_PAGE_RETRIES
+                    + " retry — treating as end of list");
             finish(null);
         }
     }
@@ -288,6 +297,23 @@ public class JalistScanner {
         waitTicks = 0;
     }
 
+    /**
+     * Log which namelayer groups the scan covered. Visibility on the dashboard
+     * is inherited from where a group's reports already go, so a group name
+     * YeetVis has never seen an event for explains an empty map far faster
+     * than guessing does.
+     */
+    private void logGroupBreakdown() {
+        java.util.Map<String, Integer> counts = new java.util.TreeMap<>();
+        for (JalistEntry e : pending) {
+            counts.merge(e.group == null ? "(none)" : e.group, 1, Integer::sum);
+        }
+        if (counts.isEmpty()) return;
+        StringBuilder sb = new StringBuilder("[Yeedar] groups in this batch:");
+        counts.forEach((g, n) -> sb.append(' ').append(g).append('=').append(n));
+        System.out.println(sb);
+    }
+
     /** Send everything read so far. Safe to call repeatedly: the server upserts
      *  by position and never deletes, so batches compose. */
     private void flush() {
@@ -311,6 +337,7 @@ public class JalistScanner {
         }
         feedback(String.format("§aRead %d snitches across %d page%s. Uploading...",
                 seenKeys.size(), pages, pages == 1 ? "" : "s"));
+        logGroupBreakdown();
         flush();
     }
 
