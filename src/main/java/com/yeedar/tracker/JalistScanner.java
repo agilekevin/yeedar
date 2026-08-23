@@ -37,6 +37,14 @@ public class JalistScanner {
     private static final int MAX_PAGES = 200;
     /** Upload once this many unsent snitches have accumulated. */
     private static final int BATCH_SIZE = 400;
+    /**
+     * Pause between page clicks. Clicking as fast as pages arrive got ~4 per
+     * second and the server simply stopped sending new ones after seven, so it
+     * is throttling us. Pace the clicks instead of hammering it.
+     */
+    private static final int CLICK_DELAY_TICKS = 6;
+    /** Re-click before concluding a page timeout was the end of the list. */
+    private static final int MAX_PAGE_RETRIES = 2;
 
     /**
      * How long after the player types /jalist we keep watching for the window
@@ -50,6 +58,8 @@ public class JalistScanner {
     private int armedTicks = 0;
     private boolean awaitingPage = false;
     private int waitTicks = 0;
+    private int pageRetries = 0;
+    private int clickDelay = 0;
     private int pages = 0;
     private String lastFingerprint = null;
     private int uploadedTotal = 0;
@@ -102,6 +112,8 @@ public class JalistScanner {
         armed = false;
         awaitingPage = false;
         waitTicks = 0;
+        pageRetries = 0;
+        clickDelay = 0;
         pages = 0;
         lastFingerprint = null;
         uploadedTotal = 0;
@@ -135,16 +147,31 @@ public class JalistScanner {
         List<ItemStack> stacks = ((HandledScreen<?>) mc.currentScreen).getScreenHandler().getStacks();
         String fingerprint = fingerprint(stacks);
 
+        if (clickDelay > 0) {
+            if (--clickDelay == 0) clickNextPage(mc, stacks);
+            return;
+        }
+
         if (awaitingPage) {
             if (fingerprint.equals(lastFingerprint)) {
                 if (++waitTicks > PAGE_TIMEOUT_TICKS) {
-                    // No new page arrived: this was the last one.
-                    finish(null);
+                    if (pageRetries < MAX_PAGE_RETRIES) {
+                        // A dropped click looks identical to the end of the
+                        // list, so re-click before believing it.
+                        pageRetries++;
+                        waitTicks = 0;
+                        System.out.println("[Yeedar] page " + (pages + 1)
+                                + " timed out; retry " + pageRetries);
+                        clickNextPage(mc, stacks);
+                    } else {
+                        finish(null);
+                    }
                 }
                 return;   // same page still showing; keep waiting
             }
             awaitingPage = false;
             waitTicks = 0;
+            pageRetries = 0;
         }
 
         // A fingerprint we have already read means paging wrapped around, which
@@ -167,7 +194,7 @@ public class JalistScanner {
             finish("§eScan stopped at the " + MAX_PAGES + "-page limit.");
             return;
         }
-        clickNextPage(mc, stacks);
+        clickDelay = CLICK_DELAY_TICKS;
     }
 
     private void readPage(List<ItemStack> stacks) {
@@ -186,9 +213,9 @@ public class JalistScanner {
         }
         // Per-page detail: "parsed < candidates" means the lore did not match,
         // "added < parsed" means the page repeated snitches we already had.
-        System.out.printf("[Yeedar] jalist page %d: %d slots, %d snitch items, "
-                        + "%d parsed, %d new (total %d)%n",
-                pages + 1, stacks.size(), candidates, parsed, added, seenKeys.size());
+        System.out.println("[Yeedar] jalist page " + (pages + 1) + ": " + stacks.size()
+                + " slots, " + candidates + " snitch items, " + parsed + " parsed, "
+                + added + " new (total " + seenKeys.size() + ")");
         if (candidates > parsed) {
             describeUnparsed(stacks);
         }
