@@ -31,8 +31,12 @@ public class JalistScanner {
     private static final JalistScanner INSTANCE = new JalistScanner();
 
     private static final int NEXT_PAGE_SLOT = 53;
-    /** Give the server time to send the new page before re-reading. */
-    private static final int PAGE_TIMEOUT_TICKS = 120;   // 6 seconds
+    /**
+     * How long to wait for a page before doing anything about it. Doubles on
+     * each stall, up to WAIT_MAX.
+     */
+    private static final int WAIT_BASE_TICKS = 120;   // 6 seconds
+    private static final int WAIT_MAX_TICKS = 480;    // 24 seconds
     /** Stop rather than loop forever if paging never terminates. */
     private static final int MAX_PAGES = 200;
     /** Upload once this many unsent snitches have accumulated. */
@@ -42,7 +46,17 @@ public class JalistScanner {
      * second and the server simply stopped sending new ones after seven, so it
      * is throttling us. Pace the clicks instead of hammering it.
      */
-    private static final int CLICK_DELAY_TICKS = 14;   // ~700ms
+    /**
+     * Gap between page clicks. The server allows a short burst — about seven
+     * pages — then stalls, which is a token bucket with a slow refill rather
+     * than a per-request limit. Recovering and then immediately clicking again
+     * just re-exhausts it, so the gap widens permanently for the rest of a
+     * scan each time we stall, converging on the sustained rate the server
+     * will actually serve.
+     */
+    private static final int CLICK_DELAY_MIN = 14;     // ~700ms
+    private static final int CLICK_DELAY_MAX = 80;     // ~4s
+    private static final double CLICK_BACKOFF = 1.7;
     /**
      * Re-click at most once before concluding the list ended. Retrying is a
      * gamble: if the original click did register and the server is merely
@@ -64,6 +78,10 @@ public class JalistScanner {
     private int waitTicks = 0;
     private int pageRetries = 0;
     private int clickDelay = 0;
+    /** Both adapt during a scan; they never speed back up, so one hiccup does
+     *  not have to be re-learned page after page. */
+    private int clickDelayTicks = CLICK_DELAY_MIN;
+    private int waitBudget = WAIT_BASE_TICKS;
     private int pages = 0;
     private String lastFingerprint = null;
     private int uploadedTotal = 0;
@@ -129,6 +147,8 @@ public class JalistScanner {
         waitTicks = 0;
         pageRetries = 0;
         clickDelay = 0;
+        clickDelayTicks = CLICK_DELAY_MIN;
+        waitBudget = WAIT_BASE_TICKS;
         pages = 0;
         lastFingerprint = null;
         uploadedTotal = 0;
@@ -167,7 +187,7 @@ public class JalistScanner {
         // real page (which is what the server was throttling), and an empty
         // fingerprint that later matched and ended the scan early.
         if (countSnitchItems(stacks) == 0) {
-            if (active && pages > 0 && ++waitTicks > PAGE_TIMEOUT_TICKS) {
+            if (active && pages > 0 && ++waitTicks > waitBudget) {
                 retryOrFinish(mc, stacks);
             }
             return;
@@ -182,7 +202,7 @@ public class JalistScanner {
 
         if (awaitingPage) {
             if (fingerprint.equals(lastFingerprint)) {
-                if (++waitTicks > PAGE_TIMEOUT_TICKS) {
+                if (++waitTicks > waitBudget) {
                     retryOrFinish(mc, stacks);
                 }
                 return;   // same page still showing; keep waiting
@@ -190,6 +210,7 @@ public class JalistScanner {
             awaitingPage = false;
             waitTicks = 0;
             pageRetries = 0;
+            waitBudget = WAIT_BASE_TICKS;   // pace stays where it was learned
         }
 
         // A page whose contents we have already read means paging wrapped,
@@ -214,24 +235,41 @@ public class JalistScanner {
             finish("§eScan stopped at the " + MAX_PAGES + "-page limit.");
             return;
         }
-        clickDelay = CLICK_DELAY_TICKS;
+        clickDelay = clickDelayTicks;
     }
 
     /** A dropped click and the end of the list look identical, so re-click
      *  before believing the list is finished. */
     private void retryOrFinish(MinecraftClient mc, List<ItemStack> stacks) {
+        // Every stall is evidence the pace is too fast, so slow the rest of
+        // the scan whichever branch we take below.
+        clickDelayTicks = Math.min(CLICK_DELAY_MAX,
+                (int) Math.ceil(clickDelayTicks * CLICK_BACKOFF));
+
+        if (waitBudget < WAIT_MAX_TICKS) {
+            // Wait longer before touching anything. Re-clicking is the risky
+            // move: if the first click did register and the server is merely
+            // throttled, a second one advances an extra page and silently
+            // skips its contents. Patience cannot cause that.
+            waitBudget = Math.min(WAIT_MAX_TICKS, waitBudget * 2);
+            waitTicks = 0;
+            System.out.println("[Yeedar] page " + (pages + 1) + " slow; waiting up to "
+                    + (waitBudget / 20) + "s, page gap now " + (clickDelayTicks * 50) + "ms");
+            return;
+        }
+
         if (pageRetries < MAX_PAGE_RETRIES) {
             pageRetries++;
             waitTicks = 0;
             System.out.println("[Yeedar] page " + (pages + 1)
-                    + " timed out; retry " + pageRetries);
+                    + " timed out after " + (waitBudget / 20) + "s; re-clicking");
             clickNextPage(mc, stacks);
-        } else {
-            System.out.println("[Yeedar] page " + (pages + 1)
-                    + " never arrived after " + MAX_PAGE_RETRIES
-                    + " retry — treating as end of list");
-            finish(null);
+            return;
         }
+
+        System.out.println("[Yeedar] page " + (pages + 1)
+                + " never arrived — treating as end of list");
+        finish(null);
     }
 
     private static int countSnitchItems(List<ItemStack> stacks) {
