@@ -43,7 +43,7 @@ public class JalistScanner {
      * to re-click, and AIMD recovery undoes an over-reaction within three
      * clean pages.
      */
-    private static final int WAIT_BASE_TICKS = 20;    // 1 second
+    private static final int WAIT_BASE_TICKS = 24;    // 1.2s
     private static final int WAIT_MAX_TICKS = 480;    // 24 seconds
     private static final double WAIT_BACKOFF = 1.5;
     /**
@@ -78,11 +78,15 @@ public class JalistScanner {
     private static final double CLICK_RECOVER = 0.9;
     private static final int CLEAN_PAGES_BEFORE_RECOVER = 3;
     /**
-     * Re-click at most once before concluding the list ended. Retrying is a
-     * gamble: if the original click did register and the server is merely
-     * slow, the retry advances an extra page and silently skips its contents.
+     * Re-click promptly and repeatedly when a page does not arrive.
+     *
+     * <p>This started out preferring to wait, on the theory that a retry could
+     * double-advance if the first click had registered and the server was just
+     * slow. The logs say otherwise: a stalled page never arrives on its own,
+     * and a manual click resolves it instantly. So clicks are being dropped,
+     * not delayed, and waiting is the one response that cannot help.
      */
-    private static final int MAX_PAGE_RETRIES = 1;
+    private static final int MAX_PAGE_RETRIES = 6;
 
     /**
      * How long after the player types /jalist we keep watching for the window
@@ -308,37 +312,28 @@ public class JalistScanner {
     /** A dropped click and the end of the list look identical, so re-click
      *  before believing the list is finished. */
     private void retryOrFinish(MinecraftClient mc, List<ItemStack> stacks) {
-        // Every stall is evidence the pace is too fast, so slow the rest of
-        // the scan whichever branch we take below.
-        clickDelayTicks = Math.min(CLICK_DELAY_MAX,
-                (int) Math.ceil(clickDelayTicks * CLICK_BACKOFF));
         cleanStreak = 0;
-
-        if (waitBudget < WAIT_MAX_TICKS) {
-            // Wait longer before touching anything. Re-clicking is the risky
-            // move: if the first click did register and the server is merely
-            // throttled, a second one advances an extra page and silently
-            // skips its contents. Patience cannot cause that.
-            waitBudget = Math.min(WAIT_MAX_TICKS, (int) Math.ceil(waitBudget * WAIT_BACKOFF));
-            waitTicks = 0;
-            System.out.println("[Yeedar] page " + (pages + 1) + " slow; waiting up to "
-                    + (waitBudget / 20) + "s, page gap now " + (clickDelayTicks * 50) + "ms");
-            feedback("§7Page " + (pages + 1) + " is slow — still going ("
-                    + seenKeys.size() + " snitches so far)...");
-            return;
-        }
-
         if (pageRetries < MAX_PAGE_RETRIES) {
             pageRetries++;
             waitTicks = 0;
-            System.out.println("[Yeedar] page " + (pages + 1)
-                    + " timed out after " + (waitBudget / 20) + "s; re-clicking");
+            // Grow the wait a little each time so a genuinely slow server is
+            // still given room, but keep clicking — that is what actually
+            // unsticks a dropped click.
+            waitBudget = Math.min(WAIT_MAX_TICKS, (int) Math.ceil(waitBudget * WAIT_BACKOFF));
+            clickDelayTicks = Math.min(CLICK_DELAY_MAX,
+                    (int) Math.ceil(clickDelayTicks * CLICK_BACKOFF));
+            System.out.println("[Yeedar] page " + (pages + 1) + " did not arrive; re-clicking ("
+                    + pageRetries + "/" + MAX_PAGE_RETRIES + "), next wait "
+                    + (waitBudget / 20.0) + "s");
+            if (pageRetries == 1 || pageRetries == MAX_PAGE_RETRIES) {
+                feedback("§7Page " + (pages + 1) + " is slow — retrying ("
+                        + seenKeys.size() + " snitches so far)...");
+            }
             clickNextPage(mc, stacks);
             return;
         }
-
-        System.out.println("[Yeedar] page " + (pages + 1)
-                + " never arrived — treating as end of list");
+        System.out.println("[Yeedar] page " + (pages + 1) + " never arrived after "
+                + MAX_PAGE_RETRIES + " clicks — treating as end of list");
         finish(null);
     }
 
