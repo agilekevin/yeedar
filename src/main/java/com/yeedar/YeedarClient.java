@@ -11,7 +11,12 @@ import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
 import net.fabricmc.fabric.api.client.message.v1.ClientSendMessageEvents;
 
+import java.util.regex.Pattern;
+
 public class YeedarClient implements ClientModInitializer {
+
+    /** JukeAlert's snitch list, and its /jal alias. */
+    private static final Pattern JALIST_COMMAND = Pattern.compile("^ja(?:list|l)?(?:\\s|$)");
 
     private int friendlyRefreshCounter = 0;
     private static final int FRIENDLY_REFRESH_INTERVAL = 600; // ticks = 30 seconds
@@ -38,6 +43,11 @@ public class YeedarClient implements ClientModInitializer {
         // Watch outgoing commands for /nllm (command string has no leading slash)
         ClientSendMessageEvents.COMMAND.register((command) -> {
             NamelayerListener.getInstance().onOutgoingChat("/" + command);
+            // /jalist opens a GUI rather than replying in chat, so this only
+            // arms the scanner — the tick loop starts it once the window shows.
+            if (JALIST_COMMAND.matcher(command).find()) {
+                JalistScanner.getInstance().onJalistCommand();
+            }
         });
 
         // Watch incoming chat for namelayer member lists

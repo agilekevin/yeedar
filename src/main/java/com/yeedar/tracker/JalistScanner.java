@@ -36,7 +36,16 @@ public class JalistScanner {
     /** Stop rather than loop forever if the arrow never goes away. */
     private static final int MAX_PAGES = 200;
 
+    /**
+     * How long after the player types /jalist we keep watching for the window
+     * to appear. Long enough for a laggy server, short enough that an unrelated
+     * container opened a minute later is never mistaken for the reply.
+     */
+    private static final int ARM_TIMEOUT_TICKS = 200;   // 10 seconds
+
     private boolean active = false;
+    private boolean armed = false;
+    private int armedTicks = 0;
     private boolean awaitingPage = false;
     private int waitTicks = 0;
     private int pages = 0;
@@ -52,6 +61,24 @@ public class JalistScanner {
         return active;
     }
 
+    /**
+     * Called when the player sends /jalist. The GUI has not opened yet, so this
+     * only arms the scanner; {@link #tick} starts the scan once the window
+     * actually appears.
+     *
+     * <p>Matching the command rather than merely noticing a JukeAlert window is
+     * what keeps this from hijacking a window the player opened deliberately to
+     * read by hand.
+     */
+    public void onJalistCommand() {
+        if (active) return;
+        armed = true;
+        armedTicks = 0;
+        // Say something now: the window takes a moment to arrive, and silence
+        // here is indistinguishable from the detection not working at all.
+        feedback("§7Detected /jalist — waiting for the window...");
+    }
+
     /** Begin a scan against an already-open jalist GUI. */
     public boolean start() {
         MinecraftClient mc = MinecraftClient.getInstance();
@@ -64,6 +91,7 @@ public class JalistScanner {
             return false;
         }
         active = true;
+        armed = false;
         awaitingPage = false;
         waitTicks = 0;
         pages = 0;
@@ -75,6 +103,15 @@ public class JalistScanner {
 
     /** Called every client tick; cheap no-op unless a scan is running. */
     public void tick(MinecraftClient mc) {
+        if (armed) {
+            if (isJalistOpen(mc)) {
+                armed = false;
+                start();
+            } else if (++armedTicks > ARM_TIMEOUT_TICKS) {
+                armed = false;   // the window never came; stop watching
+                feedback("§eNo jalist window appeared — run §f/yeedar jalist§e with it open.");
+            }
+        }
         if (!active) return;
 
         if (!isJalistOpen(mc)) {
