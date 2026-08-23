@@ -145,6 +145,19 @@ public class JalistScanner {
         }
 
         List<ItemStack> stacks = ((HandledScreen<?>) mc.currentScreen).getScreenHandler().getStacks();
+
+        // Clicking makes the client optimistically empty the container before
+        // the server's real contents arrive. That predicted state is not a
+        // page: counting it produced a phantom empty page, a second click per
+        // real page (which is what the server was throttling), and an empty
+        // fingerprint that later matched and ended the scan early.
+        if (countSnitchItems(stacks) == 0) {
+            if (active && pages > 0 && ++waitTicks > PAGE_TIMEOUT_TICKS) {
+                retryOrFinish(mc, stacks);
+            }
+            return;
+        }
+
         String fingerprint = fingerprint(stacks);
 
         if (clickDelay > 0) {
@@ -155,17 +168,7 @@ public class JalistScanner {
         if (awaitingPage) {
             if (fingerprint.equals(lastFingerprint)) {
                 if (++waitTicks > PAGE_TIMEOUT_TICKS) {
-                    if (pageRetries < MAX_PAGE_RETRIES) {
-                        // A dropped click looks identical to the end of the
-                        // list, so re-click before believing it.
-                        pageRetries++;
-                        waitTicks = 0;
-                        System.out.println("[Yeedar] page " + (pages + 1)
-                                + " timed out; retry " + pageRetries);
-                        clickNextPage(mc, stacks);
-                    } else {
-                        finish(null);
-                    }
+                    retryOrFinish(mc, stacks);
                 }
                 return;   // same page still showing; keep waiting
             }
@@ -174,10 +177,10 @@ public class JalistScanner {
             pageRetries = 0;
         }
 
-        // A fingerprint we have already read means paging wrapped around, which
-        // is the reliable end-of-list signal. The next-page arrow is not: the
-        // client removes it from the slot the moment we click it, so checking
-        // whether it is still there stops the scan after a single page.
+        // A page whose contents we have already read means paging wrapped,
+        // which is the reliable end-of-list signal. The next-page arrow is
+        // not: the client removes it from the slot the moment it is clicked,
+        // so it is absent from most pages even mid-list.
         if (!seenPages.add(fingerprint)) {
             finish(null);
             return;
@@ -195,6 +198,28 @@ public class JalistScanner {
             return;
         }
         clickDelay = CLICK_DELAY_TICKS;
+    }
+
+    /** A dropped click and the end of the list look identical, so re-click
+     *  before believing the list is finished. */
+    private void retryOrFinish(MinecraftClient mc, List<ItemStack> stacks) {
+        if (pageRetries < MAX_PAGE_RETRIES) {
+            pageRetries++;
+            waitTicks = 0;
+            System.out.println("[Yeedar] page " + (pages + 1)
+                    + " timed out; retry " + pageRetries);
+            clickNextPage(mc, stacks);
+        } else {
+            finish(null);
+        }
+    }
+
+    private static int countSnitchItems(List<ItemStack> stacks) {
+        int n = 0;
+        for (ItemStack st : stacks) {
+            if (st.isOf(Items.NOTE_BLOCK) || st.isOf(Items.JUKEBOX)) n++;
+        }
+        return n;
     }
 
     private void readPage(List<ItemStack> stacks) {
