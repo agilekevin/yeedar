@@ -35,8 +35,16 @@ public class JalistScanner {
      * How long to wait for a page before doing anything about it. Doubles on
      * each stall, up to WAIT_MAX.
      */
-    private static final int WAIT_BASE_TICKS = 120;   // 6 seconds
+    private static final int WAIT_BASE_TICKS = 60;    // 3 seconds
     private static final int WAIT_MAX_TICKS = 480;    // 24 seconds
+    private static final double WAIT_BACKOFF = 1.5;
+    /**
+     * How long the window may vanish mid-scan before we give up on it.
+     * Paginated server GUIs often close the old inventory and open a new one
+     * per page rather than updating in place, so a slow page shows up here as
+     * a missing screen — not as the player closing it.
+     */
+    private static final int REOPEN_GRACE_TICKS = 200;   // 10 seconds
     /** Stop rather than loop forever if paging never terminates. */
     private static final int MAX_PAGES = 200;
     /** Upload once this many unsent snitches have accumulated. */
@@ -56,7 +64,11 @@ public class JalistScanner {
      */
     private static final int CLICK_DELAY_MIN = 14;     // ~700ms
     private static final int CLICK_DELAY_MAX = 80;     // ~4s
-    private static final double CLICK_BACKOFF = 1.7;
+    /** Back off hard on a stall, recover gently once pages flow again (AIMD).
+     *  Purely monotonic slowing meant one hiccup taxed every remaining page. */
+    private static final double CLICK_BACKOFF = 1.35;
+    private static final double CLICK_RECOVER = 0.9;
+    private static final int CLEAN_PAGES_BEFORE_RECOVER = 3;
     /**
      * Re-click at most once before concluding the list ended. Retrying is a
      * gamble: if the original click did register and the server is merely
@@ -82,6 +94,8 @@ public class JalistScanner {
      *  not have to be re-learned page after page. */
     private int clickDelayTicks = CLICK_DELAY_MIN;
     private int waitBudget = WAIT_BASE_TICKS;
+    private int screenGoneTicks = 0;
+    private int cleanStreak = 0;
     private int pages = 0;
     private String lastFingerprint = null;
     private int uploadedTotal = 0;
@@ -149,6 +163,8 @@ public class JalistScanner {
         clickDelay = 0;
         clickDelayTicks = CLICK_DELAY_MIN;
         waitBudget = WAIT_BASE_TICKS;
+        screenGoneTicks = 0;
+        cleanStreak = 0;
         pages = 0;
         lastFingerprint = null;
         uploadedTotal = 0;
@@ -173,10 +189,26 @@ public class JalistScanner {
         if (!active) return;
 
         if (!isJalistOpen(mc)) {
-            // The player closed the window (or the server did). Keep whatever
-            // was read rather than throwing away a partial scan.
-            finish("§eScan ended early — jalist closed.");
+            // Do not treat this as the end straight away. The server reopens
+            // the inventory to turn a page, so a slow page looks exactly like
+            // a closed window for a moment — bailing here ended scans at the
+            // first page the server was slow to send.
+            if (++screenGoneTicks == 1) {
+                System.out.println("[Yeedar] jalist window vanished after page "
+                        + pages + "; waiting for it to reopen");
+            }
+            if (screenGoneTicks > REOPEN_GRACE_TICKS) {
+                finish("§eScan ended — jalist closed and did not reopen.");
+            }
             return;
+        }
+        if (screenGoneTicks > 0) {
+            System.out.println("[Yeedar] jalist window reopened after "
+                    + (screenGoneTicks * 50) + "ms");
+            screenGoneTicks = 0;
+            // A reopened window is a fresh container; the pending click is done.
+            awaitingPage = false;
+            waitTicks = 0;
         }
 
         List<ItemStack> stacks = ((HandledScreen<?>) mc.currentScreen).getScreenHandler().getStacks();
@@ -210,7 +242,17 @@ public class JalistScanner {
             awaitingPage = false;
             waitTicks = 0;
             pageRetries = 0;
-            waitBudget = WAIT_BASE_TICKS;   // pace stays where it was learned
+            waitBudget = WAIT_BASE_TICKS;
+            // Pages are flowing again: ease the gap back down gradually rather
+            // than paying for one stall for the rest of the scan.
+            if (++cleanStreak >= CLEAN_PAGES_BEFORE_RECOVER
+                    && clickDelayTicks > CLICK_DELAY_MIN) {
+                cleanStreak = 0;
+                clickDelayTicks = Math.max(CLICK_DELAY_MIN,
+                        (int) (clickDelayTicks * CLICK_RECOVER));
+                System.out.println("[Yeedar] pages flowing; gap eased to "
+                        + (clickDelayTicks * 50) + "ms");
+            }
         }
 
         // A page whose contents we have already read means paging wrapped,
@@ -226,6 +268,9 @@ public class JalistScanner {
 
         readPage(stacks);
         describeControls(stacks);
+        if (pages > 0 && pages % 5 == 0) {
+            feedback("§7" + pages + " pages, " + seenKeys.size() + " snitches...");
+        }
         lastFingerprint = fingerprint;
         pages++;
 
@@ -245,16 +290,19 @@ public class JalistScanner {
         // the scan whichever branch we take below.
         clickDelayTicks = Math.min(CLICK_DELAY_MAX,
                 (int) Math.ceil(clickDelayTicks * CLICK_BACKOFF));
+        cleanStreak = 0;
 
         if (waitBudget < WAIT_MAX_TICKS) {
             // Wait longer before touching anything. Re-clicking is the risky
             // move: if the first click did register and the server is merely
             // throttled, a second one advances an extra page and silently
             // skips its contents. Patience cannot cause that.
-            waitBudget = Math.min(WAIT_MAX_TICKS, waitBudget * 2);
+            waitBudget = Math.min(WAIT_MAX_TICKS, (int) Math.ceil(waitBudget * WAIT_BACKOFF));
             waitTicks = 0;
             System.out.println("[Yeedar] page " + (pages + 1) + " slow; waiting up to "
                     + (waitBudget / 20) + "s, page gap now " + (clickDelayTicks * 50) + "ms");
+            feedback("§7Page " + (pages + 1) + " is slow — still going ("
+                    + seenKeys.size() + " snitches so far)...");
             return;
         }
 
