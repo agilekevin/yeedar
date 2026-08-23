@@ -8,6 +8,8 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import com.yeedar.tracker.JalistEntry;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.text.Text;
 
 import java.time.Instant;
 import java.util.ArrayDeque;
@@ -125,15 +127,33 @@ public class YeetVisClient {
                 .thenAccept(response -> {
                     if (response.statusCode() == 200) {
                         System.out.println("[Yeedar] Uploaded " + rows.size() + " snitches: " + response.body());
+                        chat("§aUpload complete — " + rows.size() + " snitches sent to YeetVis.");
                     } else {
                         System.err.println("[Yeedar] jalist upload returned "
                                 + response.statusCode() + ": " + response.body());
+                        chat("§cUpload failed (HTTP " + response.statusCode() + "). Check /yeedar status.");
                     }
                 })
                 .exceptionally(t -> {
                     System.err.println("[Yeedar] jalist upload failed: " + t.getMessage());
+                    chat("§cUpload failed: " + t.getMessage());
                     return null;
                 });
+    }
+
+    /**
+     * Report to chat from an HTTP completion.
+     *
+     * <p>These callbacks run on an HttpClient worker thread, so the message is
+     * marshalled onto the client thread before touching the player.
+     */
+    private static void chat(String message) {
+        MinecraftClient mc = MinecraftClient.getInstance();
+        mc.execute(() -> {
+            if (mc.player != null) {
+                mc.player.sendMessage(Text.literal("[Yeedar] " + message), false);
+            }
+        });
     }
 
     private static synchronized boolean checkRateLimit() {

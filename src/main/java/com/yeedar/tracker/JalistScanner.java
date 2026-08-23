@@ -9,9 +9,9 @@ import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.text.Text;
 
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
+import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
+import java.util.Set;
 
 /**
  * Reads every page of the JukeAlert {@code /jalist} GUI and uploads the result.
@@ -33,8 +33,10 @@ public class JalistScanner {
     private static final int NEXT_PAGE_SLOT = 53;
     /** Give the server time to send the new page before re-reading. */
     private static final int PAGE_TIMEOUT_TICKS = 60;
-    /** Stop rather than loop forever if the arrow never goes away. */
+    /** Stop rather than loop forever if paging never terminates. */
     private static final int MAX_PAGES = 200;
+    /** Upload once this many unsent snitches have accumulated. */
+    private static final int BATCH_SIZE = 400;
 
     /**
      * How long after the player types /jalist we keep watching for the window
@@ -50,8 +52,14 @@ public class JalistScanner {
     private int waitTicks = 0;
     private int pages = 0;
     private String lastFingerprint = null;
-    // Keyed by position so a snitch appearing on two pages is not double-counted.
-    private final Map<String, JalistEntry> found = new LinkedHashMap<>();
+    private int uploadedTotal = 0;
+    /** Positions seen this scan, so a repeat across pages is never re-sent. */
+    private final Set<String> seenKeys = new HashSet<>();
+    /** Read but not yet uploaded. Flushed in batches so a long scan makes
+     *  durable progress instead of risking everything on one final request. */
+    private final List<JalistEntry> pending = new ArrayList<>();
+    /** Page fingerprints already read — the reliable end-of-list signal. */
+    private final Set<String> seenPages = new HashSet<>();
 
     public static JalistScanner getInstance() {
         return INSTANCE;
@@ -96,7 +104,10 @@ public class JalistScanner {
         waitTicks = 0;
         pages = 0;
         lastFingerprint = null;
-        found.clear();
+        uploadedTotal = 0;
+        seenKeys.clear();
+        pending.clear();
+        seenPages.clear();
         feedback("§7Scanning /jalist...");
         return true;
     }
@@ -127,7 +138,8 @@ public class JalistScanner {
         if (awaitingPage) {
             if (fingerprint.equals(lastFingerprint)) {
                 if (++waitTicks > PAGE_TIMEOUT_TICKS) {
-                    finish("§eScan ended — next page never arrived.");
+                    // No new page arrived: this was the last one.
+                    finish(null);
                 }
                 return;   // same page still showing; keep waiting
             }
@@ -135,16 +147,24 @@ public class JalistScanner {
             waitTicks = 0;
         }
 
+        // A fingerprint we have already read means paging wrapped around, which
+        // is the reliable end-of-list signal. The next-page arrow is not: the
+        // client removes it from the slot the moment we click it, so checking
+        // whether it is still there stops the scan after a single page.
+        if (!seenPages.add(fingerprint)) {
+            finish(null);
+            return;
+        }
+
         readPage(stacks);
+        describeControls(stacks);
         lastFingerprint = fingerprint;
         pages++;
 
+        if (pending.size() >= BATCH_SIZE) flush();
+
         if (pages >= MAX_PAGES) {
-            finish("§eScan stopped at the page limit.");
-            return;
-        }
-        if (!hasNextPage(stacks)) {
-            finish(null);
+            finish("§eScan stopped at the " + MAX_PAGES + "-page limit.");
             return;
         }
         clickNextPage(mc, stacks);
@@ -152,13 +172,57 @@ public class JalistScanner {
 
     private void readPage(List<ItemStack> stacks) {
         long now = System.currentTimeMillis();
+        int candidates = 0, parsed = 0, added = 0;
         for (ItemStack stack : stacks) {
+            if (stack.isOf(Items.NOTE_BLOCK) || stack.isOf(Items.JUKEBOX)) candidates++;
             JalistEntry entry = JalistEntry.fromStack(stack, now);
             if (entry != null) {
-                // Later pages win: a re-read is at worst equally fresh.
-                found.put(entry.key(), entry);
+                parsed++;
+                if (seenKeys.add(entry.key())) {
+                    pending.add(entry);
+                    added++;
+                }
             }
         }
+        // Per-page detail: "parsed < candidates" means the lore did not match,
+        // "added < parsed" means the page repeated snitches we already had.
+        System.out.printf("[Yeedar] jalist page %d: %d slots, %d snitch items, "
+                        + "%d parsed, %d new (total %d)%n",
+                pages + 1, stacks.size(), candidates, parsed, added, seenKeys.size());
+        if (candidates > parsed) {
+            describeUnparsed(stacks);
+        }
+    }
+
+    /** Dump the first slot that looked like a snitch but would not parse. */
+    private void describeUnparsed(List<ItemStack> stacks) {
+        long now = System.currentTimeMillis();
+        for (ItemStack stack : stacks) {
+            if (!(stack.isOf(Items.NOTE_BLOCK) || stack.isOf(Items.JUKEBOX))) continue;
+            if (JalistEntry.fromStack(stack, now) != null) continue;
+            System.out.println("[Yeedar]   unparsed: " + stack.getName().getString());
+            var lore = stack.get(net.minecraft.component.DataComponentTypes.LORE);
+            if (lore == null) {
+                System.out.println("[Yeedar]   (no lore)");
+            } else {
+                int i = 0;
+                for (net.minecraft.text.Text line : lore.lines()) {
+                    System.out.println("[Yeedar]   lore[" + (i++) + "] " + line.getString());
+                }
+            }
+            return;
+        }
+    }
+
+    /** What the control row actually holds, so a wrong next-page slot is visible. */
+    private static void describeControls(List<ItemStack> stacks) {
+        StringBuilder sb = new StringBuilder("[Yeedar] jalist controls:");
+        for (int i = 45; i < Math.min(54, stacks.size()); i++) {
+            ItemStack st = stacks.get(i);
+            if (st.isEmpty()) continue;
+            sb.append(' ').append(i).append('=').append(st.getName().getString());
+        }
+        System.out.println(sb);
     }
 
     private void clickNextPage(MinecraftClient mc, List<ItemStack> stacks) {
@@ -172,36 +236,36 @@ public class JalistScanner {
         waitTicks = 0;
     }
 
+    /** Send everything read so far. Safe to call repeatedly: the server upserts
+     *  by position and never deletes, so batches compose. */
+    private void flush() {
+        if (pending.isEmpty()) return;
+        List<JalistEntry> batch = new ArrayList<>(pending);
+        pending.clear();
+        uploadedTotal += batch.size();
+        YeetVisClient.uploadJalist(batch);
+    }
+
     private void finish(String earlyMessage) {
         active = false;
         awaitingPage = false;
-        List<JalistEntry> entries = new ArrayList<>(found.values());
-        found.clear();
 
         if (earlyMessage != null) {
             feedback(earlyMessage);
         }
-        if (entries.isEmpty()) {
+        if (seenKeys.isEmpty()) {
             feedback("§eNo snitches found — is this actually the jalist window?");
             return;
         }
         feedback(String.format("§aRead %d snitches across %d page%s. Uploading...",
-                entries.size(), pages, pages == 1 ? "" : "s"));
-        YeetVisClient.uploadJalist(entries);
+                seenKeys.size(), pages, pages == 1 ? "" : "s"));
+        flush();
     }
 
     private static boolean isJalistOpen(MinecraftClient mc) {
         if (!(mc.currentScreen instanceof HandledScreen<?> screen)) return false;
         String title = screen.getTitle().getString().toLowerCase();
         return title.contains("jukealert") || title.contains("snitch");
-    }
-
-    private static boolean hasNextPage(List<ItemStack> stacks) {
-        if (stacks.size() <= NEXT_PAGE_SLOT) return false;
-        ItemStack arrow = stacks.get(NEXT_PAGE_SLOT);
-        if (arrow.isEmpty()) return false;
-        return arrow.isOf(Items.ARROW)
-                || arrow.getName().getString().toLowerCase().contains("next");
     }
 
     /**
