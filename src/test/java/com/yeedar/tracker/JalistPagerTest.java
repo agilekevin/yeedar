@@ -189,5 +189,17 @@ class JalistPagerTest {
 
         assertTrue(!pager.finished(),
                 "a repeat while retries are outstanding must not end the scan");
+
+        // And it must keep going, not stall or quietly stop on the next tick:
+        // the first version of this reset the retry counter but not our
+        // position, so the very next tick saw the same seen-before page with
+        // retries back at zero and finished anyway.
+        Action next = Action.IDLE;
+        for (int i = 0; i < 20 && !pager.finished(); i++) {
+            next = pager.tick(new View("page-1", 45));
+            if (next == Action.CLICK) break;
+        }
+        assertEquals(Action.CLICK, next, "should resume clicking from the page it landed on");
+        assertTrue(!pager.finished(), "must not have stopped");
     }
 }

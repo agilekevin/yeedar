@@ -119,10 +119,15 @@ public final class JalistPager {
         // ended a scan early at page 7 of a longer list.
         if (seenPages.contains(view.fingerprint)) {
             if (retries > 0) {
-                // Skipped ahead. Keep reading rather than stopping: the pages
-                // we missed are lost either way, but the rest are not.
+                // Skipped ahead. Adopt this page as our position and carry on
+                // clicking: the pages we missed are lost either way, but the
+                // rest are not. Without adopting it, the very next tick sees
+                // the same already-seen fingerprint with retries back at zero
+                // and stops after all.
+                lastRead = view.fingerprint;
                 retries = 0;
                 awaitingPage = false;
+                sinceClick = 0;
                 sinceRead = 0;
                 return Action.IDLE;
             }
