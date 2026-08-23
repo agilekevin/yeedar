@@ -7,9 +7,14 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import com.yeedar.tracker.JalistEntry;
+
+import java.time.Instant;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Deque;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 public class YeetVisClient {
@@ -61,6 +66,72 @@ public class YeetVisClient {
                 })
                 .exceptionally(throwable -> {
                     System.err.println("[Yeedar] API error: " + throwable.getMessage());
+                    return null;
+                });
+    }
+
+    /**
+     * Upload a completed /jalist scan as one batch.
+     *
+     * <p>Sent whole rather than per page so the server sees a single coherent
+     * reading, mirroring how /friendlies replaces a group's members. Absence
+     * is not deletion server-side — a scan only proves what this player can
+     * see — so a partial scan is safe to send.
+     *
+     * <p>Deliberately not rate-limited: this is one user-initiated request,
+     * not the per-sighting stream the limiter exists to throttle.
+     */
+    public static void uploadJalist(List<JalistEntry> entries) {
+        YeedarConfig config = YeedarConfig.getInstance();
+        String baseUrl = config.getApiBaseUrl();
+        String token = config.getToken();
+
+        if (baseUrl == null || baseUrl.isEmpty() || token == null || token.isEmpty()) {
+            System.err.println("[Yeedar] Not configured; skipping jalist upload");
+            return;
+        }
+
+        List<Map<String, Object>> rows = new ArrayList<>(entries.size());
+        for (JalistEntry e : entries) {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("x", e.x);
+            row.put("y", e.y);
+            row.put("z", e.z);
+            row.put("world", e.world);
+            row.put("name", e.name);
+            row.put("group", e.group);
+            row.put("type", e.type);
+            // Exactly one of these is normally set: JukeAlert reports only the
+            // next event. Sending null for the other leaves whatever an
+            // earlier scan established intact.
+            row.put("dormant_ts", e.dormantTs == 0 ? null : Instant.ofEpochMilli(e.dormantTs).toString());
+            row.put("cull_ts", e.cullTs == 0 ? null : Instant.ofEpochMilli(e.cullTs).toString());
+            rows.add(row);
+        }
+
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("snitches", rows);
+        payload.put("scanned_at", Instant.now().toString());
+        payload.put("uploaded_by", config.getUsername());
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(baseUrl + "/snitches/jalist"))
+                .header("Content-Type", "application/json")
+                .header("X-Yeedar-Token", token)
+                .POST(HttpRequest.BodyPublishers.ofString(GSON.toJson(payload)))
+                .build();
+
+        HTTP_CLIENT.sendAsync(request, HttpResponse.BodyHandlers.ofString())
+                .thenAccept(response -> {
+                    if (response.statusCode() == 200) {
+                        System.out.println("[Yeedar] Uploaded " + rows.size() + " snitches: " + response.body());
+                    } else {
+                        System.err.println("[Yeedar] jalist upload returned "
+                                + response.statusCode() + ": " + response.body());
+                    }
+                })
+                .exceptionally(t -> {
+                    System.err.println("[Yeedar] jalist upload failed: " + t.getMessage());
                     return null;
                 });
     }

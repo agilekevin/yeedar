@@ -4,6 +4,7 @@ import com.mojang.brigadier.arguments.DoubleArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.yeedar.api.OAuthCallbackServer;
 import com.yeedar.config.YeedarConfig;
+import com.yeedar.tracker.JalistScanner;
 import com.yeedar.tracker.PlayerTracker;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
@@ -19,6 +20,13 @@ public class YeedarCommands {
     public static void register() {
         ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) -> {
             dispatcher.register(ClientCommandManager.literal("yeedar")
+                    .then(ClientCommandManager.literal("jalist")
+                            .executes(ctx -> {
+                                // Reads the open JukeAlert window; the scan
+                                // itself runs on the client tick.
+                                return JalistScanner.getInstance().start() ? 1 : 0;
+                            })
+                    )
                     .then(ClientCommandManager.literal("login")
                             .executes(ctx -> {
                                 YeedarConfig config = YeedarConfig.getInstance();
