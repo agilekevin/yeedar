@@ -84,25 +84,36 @@ public class JalistScanner {
     }
 
     /**
-     * Called when the player sends /jalist. The GUI has not opened yet, so this
-     * only arms the scanner; {@link #tick} starts the scan once the window
-     * actually appears.
+     * Entry point for {@code /yeedar jalist}: runs the JukeAlert command
+     * ourselves and scans the window it opens.
      *
-     * <p>Matching the command rather than merely noticing a JukeAlert window is
-     * what keeps this from hijacking a window the player opened deliberately to
-     * read by hand.
+     * <p>Yeedar used to watch for the player typing /jalist and take over the
+     * resulting window. That was disorienting — a window you opened to read by
+     * hand would start paging itself. Owning the whole interaction makes it
+     * explicit: nothing moves unless you asked for a scan.
      */
-    public void onJalistCommand() {
-        if (active) return;
+    public void beginScan() {
+        MinecraftClient mc = MinecraftClient.getInstance();
+        if (active) {
+            feedback("§eScan already running.");
+            return;
+        }
+        if (isJalistOpen(mc)) {
+            start();          // already looking at it; no need to reopen
+            return;
+        }
+        if (mc.player == null || mc.player.networkHandler == null) {
+            feedback("§cNot connected to a server.");
+            return;
+        }
         armed = true;
         armedTicks = 0;
-        // Say something now: the window takes a moment to arrive, and silence
-        // here is indistinguishable from the detection not working at all.
-        feedback("§7Detected /jalist — waiting for the window...");
+        feedback("§7Running /jalist...");
+        mc.player.networkHandler.sendChatCommand("jalist");
     }
 
-    /** Begin a scan against an already-open jalist GUI. */
-    public boolean start() {
+    /** Scan the jalist window that is already open. */
+    private boolean start() {
         MinecraftClient mc = MinecraftClient.getInstance();
         if (active) {
             feedback("§eScan already running.");
@@ -136,7 +147,7 @@ public class JalistScanner {
                 start();
             } else if (++armedTicks > ARM_TIMEOUT_TICKS) {
                 armed = false;   // the window never came; stop watching
-                feedback("§eNo jalist window appeared — run §f/yeedar jalist§e with it open.");
+                feedback("§eJukeAlert never opened a window — are you on EdenMC?");
             }
         }
         if (!active) return;

@@ -22,9 +22,10 @@ public class YeedarCommands {
             dispatcher.register(ClientCommandManager.literal("yeedar")
                     .then(ClientCommandManager.literal("jalist")
                             .executes(ctx -> {
-                                // Reads the open JukeAlert window; the scan
-                                // itself runs on the client tick.
-                                return JalistScanner.getInstance().start() ? 1 : 0;
+                                // Runs /jalist and scans the window it opens;
+                                // the scan itself runs on the client tick.
+                                JalistScanner.getInstance().beginScan();
+                                return 1;
                             })
                     )
                     .then(ClientCommandManager.literal("login")

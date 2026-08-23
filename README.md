@@ -87,15 +87,18 @@ Snitches expire — JukeAlert gives each one a dormancy timer (it stops alerting
 and then a cull timer (it is removed). `/jalist` shows those timers, but only
 inside a GUI, one page at a time.
 
-Just run `/jalist`. Yeedar notices the command, waits for the window to open,
-then reads every page (clicking through the pagination arrow itself) and uploads
-the timers to YeetVis, where they appear on the dashboard's **Snitch
-Maintenance** layer coloured by how soon each snitch expires.
+Run `/yeedar jalist`. It issues the JukeAlert `/jalist` command itself, then
+reads every page of the window that opens — clicking through the pagination
+itself — and uploads the timers to YeetVis, where they appear on the
+dashboard's **Snitch Maintenance** layer coloured by how soon each snitch
+expires.
 
-You will see `Detected /jalist — waiting for the window...` as confirmation.
+Leave the window alone while it runs; it drives itself and takes a few seconds
+per dozen pages. If jalist is already open, `/yeedar jalist` scans that window
+instead of reopening it.
 
-`/yeedar jalist` does the same thing manually, for when the window is already
-open or was opened some other way.
+Yeedar does **not** touch a `/jalist` window you opened yourself — nothing
+moves unless you ask for a scan.
 
 Only information the window already shows you is read, and only snitches you
 have access to are ever uploaded. Nothing is deleted server-side by a scan: a
