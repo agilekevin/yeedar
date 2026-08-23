@@ -35,7 +35,15 @@ public class JalistScanner {
      * How long to wait for a page before doing anything about it. Doubles on
      * each stall, up to WAIT_MAX.
      */
-    private static final int WAIT_BASE_TICKS = 60;    // 3 seconds
+    /**
+     * Measured page latency on EdenMC is around 300ms, so 1s is roughly 3x
+     * headroom — tight enough to start adapting quickly, loose enough that
+     * ordinary jitter does not read as a stall. Reacting early is cheap here:
+     * the first response to a stall is to wait longer and ease the pace, not
+     * to re-click, and AIMD recovery undoes an over-reaction within three
+     * clean pages.
+     */
+    private static final int WAIT_BASE_TICKS = 20;    // 1 second
     private static final int WAIT_MAX_TICKS = 480;    // 24 seconds
     private static final double WAIT_BACKOFF = 1.5;
     /**
