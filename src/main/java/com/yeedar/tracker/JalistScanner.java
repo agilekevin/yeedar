@@ -102,6 +102,15 @@ public class JalistScanner {
             feedback("§cNot connected to a server.");
             return;
         }
+        // Check this before scanning, not after. A 150-page scan takes minutes,
+        // and uploading used to fail silently when unconfigured — a user could
+        // watch the whole thing succeed and lose every snitch of it.
+        String why = YeetVisClient.unconfiguredReason();
+        if (why != null) {
+            feedback("§cCannot upload — " + why);
+            feedback("§7Nothing was scanned. Fix that first, then run this again.");
+            return;
+        }
         active = true;
         settleTicks = -1;
         settleTarget = 0;
@@ -322,6 +331,11 @@ public class JalistScanner {
             } else if (lost > 0) {
                 feedback(String.format("§eDone — %d of %d uploaded, §c%d failed§e. Re-run to retry them.",
                         stored, read, lost));
+            } else if (stored == 0) {
+                // Nothing acknowledged at all: far more likely to be a dead
+                // upload path than 6,000 slow requests.
+                feedback(String.format("§cDone — none of %d snitches reached YeetVis.", read));
+                feedback("§7Check §f/yeedar status§7, then re-run.");
             } else {
                 feedback(String.format("§eDone — %d of %d confirmed; the rest may still be in flight.",
                         stored, read));

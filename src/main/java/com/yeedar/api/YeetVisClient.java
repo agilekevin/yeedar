@@ -104,8 +104,13 @@ public class YeetVisClient {
         String baseUrl = config.getApiBaseUrl();
         String token = config.getToken();
 
-        if (baseUrl == null || baseUrl.isEmpty() || token == null || token.isEmpty()) {
-            System.err.println("[Yeedar] Not configured; skipping jalist upload");
+        String why = unconfiguredReason();
+        if (why != null) {
+            // This used to return silently to stderr, which is how a 150-page
+            // scan could report success having sent nothing at all.
+            System.err.println("[Yeedar] skipping jalist upload — " + why);
+            failed.addAndGet(entries.size());
+            chat("§c" + entries.size() + " snitches not uploaded — " + why);
             return;
         }
 
@@ -140,6 +145,16 @@ public class YeetVisClient {
                 .build();
 
         send(request, rows.size(), 0);
+    }
+
+    /** Why uploads cannot be sent, or null when they can. */
+    public static String unconfiguredReason() {
+        YeedarConfig config = YeedarConfig.getInstance();
+        String baseUrl = config.getApiBaseUrl();
+        String token = config.getToken();
+        if (baseUrl == null || baseUrl.isEmpty()) return "no API URL set (/yeedar api <url>)";
+        if (token == null || token.isEmpty()) return "not logged in (/yeedar login)";
+        return null;
     }
 
     /**
