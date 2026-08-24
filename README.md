@@ -81,6 +81,8 @@ That's it — once logged in, tracking runs automatically while you play.
 | `/yeedar list` | List players currently in range and their positions. |
 | `/yeedar jalist` | Scan every snitch you can see and upload their timers. |
 | `/yeedar jalist <groups...>` | Scan specific namelayer groups (space or comma separated). |
+| `/yeedar jalist --all` | Scan every snitch you can see, ignoring the defaults. |
+| `/yeedar jalist show-defaults` | Show which namelayers the bare command scans. |
 
 ## Snitch maintenance
 
@@ -88,7 +90,9 @@ Snitches expire — JukeAlert gives each one a dormancy timer (it stops alerting
 and then a cull timer (it is removed). `/jalist` shows those timers, but only
 inside a GUI, one page at a time.
 
-Run `/yeedar jalist`. It issues the JukeAlert `/jalist` command itself, then
+Run `/yeedar jalist`. It scans the **default namelayers** — a shared list kept
+on the server, so you do not have to name them every time. It issues the
+JukeAlert `/jalist` command itself, then
 reads every page of the window that opens — clicking through the pagination
 itself — and uploads the timers to YeetVis, where they appear on the
 dashboard's **Snitch Maintenance** layer coloured by how soon each snitch
@@ -109,6 +113,14 @@ JukeAlert filters server-side, so each pass has far fewer pages to work
 through, which is markedly more reliable. Each group is reported and uploaded
 as it finishes, so a scan that stops early still keeps everything before that
 point.
+
+Most players belong to namelayers whose snitches nobody wants imported, which
+is why the bare command uses the default list rather than scanning everything.
+`/yeedar jalist show-defaults` shows what that list is; `/yeedar jalist --all`
+ignores it. The list is edited in Discord with `/yeetvis jalist set`, which is
+restricted to channel admins — it decides what everyone's scans upload, so it
+is not a per-player preference. With no defaults configured the bare command
+scans everything, as it always did.
 
 Yeedar does **not** touch a `/jalist` window you opened yourself — nothing
 moves unless you ask for a scan.

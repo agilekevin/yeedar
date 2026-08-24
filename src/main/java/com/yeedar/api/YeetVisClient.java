@@ -18,6 +18,7 @@ import java.util.Deque;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -86,6 +87,45 @@ public class YeetVisClient {
                     System.err.println("[Yeedar] API error: " + throwable.getMessage());
                     return null;
                 });
+    }
+
+    /**
+     * Fetch the shared list of namelayers a bare {@code /yeedar jalist} scans.
+     *
+     * <p>Players belong to namelayers whose snitches nobody wants imported.
+     * The list is server-side and edited from Discord, so it is the same for
+     * everyone and does not have to be retyped on every scan.
+     *
+     * <p>Hands back an empty list on any failure: falling back to "scan
+     * everything" is the old behaviour, and is better than refusing to scan.
+     */
+    public static CompletableFuture<List<String>> fetchDefaultGroups() {
+        YeedarConfig config = YeedarConfig.getInstance();
+        if (unconfiguredReason() != null) {
+            return CompletableFuture.completedFuture(List.of());
+        }
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(config.getApiBaseUrl() + "/jalist/defaults"))
+                .header("X-Yeedar-Token", config.getToken())
+                .GET()
+                .build();
+        return HTTP_CLIENT.sendAsync(request, HttpResponse.BodyHandlers.ofString())
+                .thenApply(resp -> {
+                    if (resp.statusCode() != 200) {
+                        System.err.println("[Yeedar] defaults fetch returned " + resp.statusCode());
+                        return List.<String>of();
+                    }
+                    var body = GSON.fromJson(resp.body(), DefaultsResponse.class);
+                    return body == null || body.groups == null ? List.<String>of() : body.groups;
+                })
+                .exceptionally(t -> {
+                    System.err.println("[Yeedar] defaults fetch failed: " + t.getMessage());
+                    return List.of();
+                });
+    }
+
+    private static final class DefaultsResponse {
+        List<String> groups;
     }
 
     /**

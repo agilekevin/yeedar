@@ -35,17 +35,27 @@ public class YeedarCommands {
             dispatcher.register(ClientCommandManager.literal("yeedar")
                     .then(ClientCommandManager.literal("jalist")
                             .executes(ctx -> {
-                                // Runs /jalist and scans the window it opens;
-                                // the scan itself runs on the client tick.
-                                JalistScanner.getInstance().beginScan();
+                                // Bare form scans the server's default
+                                // namelayers, which is almost always what is
+                                // meant — most players are in groups nobody
+                                // wants imported.
+                                JalistScanner.getInstance().beginScanWithDefaults();
                                 return 1;
                             })
+                            .then(ClientCommandManager.literal("--all")
+                                    .executes(ctx -> {
+                                        JalistScanner.getInstance().beginScanAll();
+                                        return 1;
+                                    })
+                            )
+                            .then(ClientCommandManager.literal("show-defaults")
+                                    .executes(ctx -> {
+                                        JalistScanner.getInstance().showDefaults();
+                                        return 1;
+                                    })
+                            )
                             .then(ClientCommandManager.argument("groups", StringArgumentType.greedyString())
                                     .executes(ctx -> {
-                                        // Accepts several namelayers, separated by
-                                        // spaces or commas: JukeAlert filters
-                                        // server-side, so scanning group by group
-                                        // keeps each pass short.
                                         JalistScanner.getInstance().beginScan(
                                                 parseGroups(StringArgumentType.getString(ctx, "groups")));
                                         return 1;

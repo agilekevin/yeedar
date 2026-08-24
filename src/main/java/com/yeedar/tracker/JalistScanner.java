@@ -81,7 +81,39 @@ public class JalistScanner {
         return active;
     }
 
-    public void beginScan() {
+    /**
+     * Bare {@code /yeedar jalist}: scan the server's default namelayers.
+     *
+     * <p>Most players belong to namelayers whose snitches nobody wants
+     * imported, so scanning everything is rarely what is meant. With no
+     * defaults configured this still scans everything, which is the behaviour
+     * this replaced.
+     */
+    public void beginScanWithDefaults() {
+        MinecraftClient mc = MinecraftClient.getInstance();
+        if (active) {
+            feedback("§eScan already running.");
+            return;
+        }
+        var why = YeetVisClient.unconfiguredReason();
+        if (why != null) {
+            feedback("§c✖ " + why.problem());
+            feedback("§7" + why.fix());
+            feedback("§8Nothing was scanned — no time wasted.");
+            return;
+        }
+        feedback("§7Fetching default namelayers...");
+        YeetVisClient.fetchDefaultGroups().thenAccept(groups -> mc.execute(() -> {
+            if (groups.isEmpty()) {
+                feedback("§7No defaults set — scanning everything.");
+                feedback("§8Set them in Discord with §f/yeetvis jalist set§8.");
+            }
+            beginScan(groups);
+        }));
+    }
+
+    /** Scan everything, ignoring the default list. */
+    public void beginScanAll() {
         beginScan(List.of());
     }
 
@@ -148,6 +180,25 @@ public class JalistScanner {
         }
         mc.player.networkHandler.sendChatCommand(
                 currentGroup == null ? "jalist" : "jalist " + currentGroup);
+    }
+
+    /** Print the server's default namelayers without scanning anything. */
+    public void showDefaults() {
+        MinecraftClient mc = MinecraftClient.getInstance();
+        var why = YeetVisClient.unconfiguredReason();
+        if (why != null) {
+            feedback("§c✖ " + why.problem());
+            feedback("§7" + why.fix());
+            return;
+        }
+        YeetVisClient.fetchDefaultGroups().thenAccept(groups -> mc.execute(() -> {
+            if (groups.isEmpty()) {
+                feedback("§7No default namelayers set — §f/yeedar jalist§7 scans everything.");
+            } else {
+                feedback("§7Default namelayers: §f" + String.join("§7, §f", groups));
+            }
+            feedback("§8Change them in Discord with §f/yeetvis jalist set§8.");
+        }));
     }
 
     /** Called every client tick; a cheap no-op unless a scan is running. */
