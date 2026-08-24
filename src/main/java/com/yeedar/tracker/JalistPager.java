@@ -1,7 +1,7 @@
 package com.yeedar.tracker;
 
-import java.util.HashSet;
-import java.util.Set;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * The paging state machine for a {@code /jalist} scan, with no Minecraft types
@@ -58,7 +58,10 @@ public final class JalistPager {
     private final int reopenGraceTicks;
     private final int maxPages;
 
-    private final Set<String> seenPages = new HashSet<>();
+    /** Page contents already read, mapped to the page number they were read
+     *  as, so a wrap can say what it matched instead of asserting it. */
+    private final Map<String, Integer> seenPages = new HashMap<>();
+    private int wrappedOnto = 0;
     private String lastRead = null;
     private int pagesRead = 0;
     private int retries = 0;
@@ -83,6 +86,11 @@ public final class JalistPager {
 
     public boolean finished() {
         return finished;
+    }
+
+    /** Which page a DONE-by-wrap matched, or 0 if the scan ended another way. */
+    public int wrappedOnto() {
+        return wrappedOnto;
     }
 
     /** Advance one tick against what the caller can currently see. */
@@ -117,7 +125,7 @@ public final class JalistPager {
         // can run the server past pages we never read, and the page that then
         // lands may well be one we have already seen. Treating that as a wrap
         // ended a scan early at page 7 of a longer list.
-        if (seenPages.contains(view.fingerprint)) {
+        if (seenPages.containsKey(view.fingerprint)) {
             if (retries > 0) {
                 // Skipped ahead. Adopt this page as our position and carry on
                 // clicking: the pages we missed are lost either way, but the
@@ -131,10 +139,11 @@ public final class JalistPager {
                 sinceRead = 0;
                 return Action.IDLE;
             }
+            wrappedOnto = seenPages.get(view.fingerprint);
             return finish(Action.DONE);
         }
 
-        seenPages.add(view.fingerprint);
+        seenPages.put(view.fingerprint, pagesRead + 1);
         lastRead = view.fingerprint;
         pagesRead++;
         retries = 0;

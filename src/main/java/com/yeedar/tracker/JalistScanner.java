@@ -129,7 +129,14 @@ public class JalistScanner {
                 }
             }
             case CLICK -> clickNextPage(mc);
-            case DONE -> finish(null);
+            case DONE -> {
+                if (pager.wrappedOnto() > 0) {
+                    System.out.println("[Yeedar] page " + (pager.pagesRead() + 1)
+                            + " matched page " + pager.wrappedOnto()
+                            + " — list wrapped, stopping");
+                }
+                finish(null);
+            }
             case GAVE_UP -> finish("§ePage " + (pager.pagesRead() + 1)
                     + " never arrived — stopping with what was read.");
             case CLOSED -> finish("§eScan ended — the jalist window closed.");
@@ -246,15 +253,32 @@ public class JalistScanner {
         return n;
     }
 
-    /** Cheap identity for a page's contents, over the snitch slots only, so a
-     *  changing control row cannot look like a new page. */
+    /**
+     * Identity for a page's contents, over the snitch slots only so a changing
+     * control row cannot look like a new page.
+     *
+     * <p>Keyed on each item's location lore line rather than its display name.
+     * Names are not unique — duplicates are common — so a name-based
+     * fingerprint makes two genuinely different pages look identical, which
+     * reads as the list wrapping and ends the scan early. That is what stopped
+     * every scan at page 7.
+     *
+     * <p>Uses the raw lore line rather than a parsed entry: this runs on every
+     * client tick, and regex-parsing 45 items twenty times a second to answer
+     * "has the page changed" is a lot of work for a string comparison.
+     */
     private static String fingerprint(List<ItemStack> stacks) {
         StringBuilder sb = new StringBuilder();
         for (ItemStack s : stacks) {
             if (s.isEmpty()) continue;
-            if (s.isOf(Items.NOTE_BLOCK) || s.isOf(Items.JUKEBOX)) {
-                sb.append(s.getName().getString()).append('|');
+            if (!(s.isOf(Items.NOTE_BLOCK) || s.isOf(Items.JUKEBOX))) continue;
+            var lore = s.get(net.minecraft.component.DataComponentTypes.LORE);
+            if (lore != null && !lore.lines().isEmpty()) {
+                sb.append(lore.lines().get(0).getString());   // "Location: world x y z"
+            } else {
+                sb.append(s.getName().getString());
             }
+            sb.append('|');
         }
         return sb.toString();
     }
