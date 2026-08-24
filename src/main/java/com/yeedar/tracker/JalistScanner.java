@@ -58,6 +58,11 @@ public class JalistScanner {
     private final List<String> done = new ArrayList<>();
     private int groupStartCount = 0;
     private int totalPages = 0;
+    /** Non-zero while waiting for in-flight uploads to finish before
+     *  summarising. Uploads retry for up to ~14s, so allow for that. */
+    private static final int UPLOAD_SETTLE_TICKS = 400;   // 20s
+    private int settleTicks = -1;
+    private int settleTarget = 0;
 
     /** Positions seen this scan, so a repeat across pages is never re-sent. */
     private final Set<String> seenKeys = new HashSet<>();
@@ -98,6 +103,9 @@ public class JalistScanner {
             return;
         }
         active = true;
+        settleTicks = -1;
+        settleTarget = 0;
+        YeetVisClient.resetUploadCounters();
         seenKeys.clear();
         pending.clear();
         allEntries.clear();
@@ -132,6 +140,12 @@ public class JalistScanner {
 
     /** Called every client tick; a cheap no-op unless a scan is running. */
     public void tick(MinecraftClient mc) {
+        if (settleTicks >= 0) {
+            // Reading is done; waiting on the last uploads to confirm.
+            reportWhenUploadsSettle(settleTarget, ++settleTicks);
+            if (settleTicks >= UPLOAD_SETTLE_TICKS) settleTicks = -1;
+            return;
+        }
         if (!active) return;
 
         if (armed) {
@@ -281,13 +295,42 @@ public class JalistScanner {
             return;
         }
         if (done.isEmpty()) {
-            feedback(String.format("§aDone — %d snitches across %d page%s.",
+            feedback(String.format("§7Read %d snitches across %d page%s. Finishing upload...",
                     seenKeys.size(), totalPages, totalPages == 1 ? "" : "s"));
         } else {
-            feedback(String.format("§aDone — %d snitches from §f%s§a.",
-                    seenKeys.size(), String.join("§a, §f", done)));
+            feedback(String.format("§7Read %d snitches from §f%s§7. Finishing upload...",
+                    seenKeys.size(), String.join("§7, §f", done)));
         }
         logGroupBreakdown();
+        reportWhenUploadsSettle(seenKeys.size(), 0);
+    }
+
+    /**
+     * Summarise once the uploads have settled.
+     *
+     * <p>Uploads are asynchronous and retried, so the count read is not the
+     * count stored. Reporting "Done — 6713" the moment reading finished was
+     * how 2,700 lost snitches went unnoticed: the scan claimed success for
+     * batches that had failed.
+     */
+    private void reportWhenUploadsSettle(int read, int waited) {
+        int stored = YeetVisClient.uploadedCount();
+        int lost = YeetVisClient.failedCount();
+        if (stored + lost >= read || waited >= UPLOAD_SETTLE_TICKS) {
+            if (lost == 0 && stored >= read) {
+                feedback(String.format("§aDone — %d snitches uploaded.", stored));
+            } else if (lost > 0) {
+                feedback(String.format("§eDone — %d of %d uploaded, §c%d failed§e. Re-run to retry them.",
+                        stored, read, lost));
+            } else {
+                feedback(String.format("§eDone — %d of %d confirmed; the rest may still be in flight.",
+                        stored, read));
+            }
+            settleTicks = -1;
+            return;
+        }
+        settleTicks = waited;
+        settleTarget = read;
     }
 
     /**

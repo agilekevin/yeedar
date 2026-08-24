@@ -18,11 +18,27 @@ import java.util.Deque;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class YeetVisClient {
     private static final HttpClient HTTP_CLIENT = HttpClient.newHttpClient();
     private static final Gson GSON = new Gson();
     private static final Deque<Long> recentSendTimestamps = new ArrayDeque<>();
+    private static final int UPLOAD_RETRIES = 3;
+    private static final long UPLOAD_RETRY_BASE_MS = 2000;
+    private static final ScheduledExecutorService RETRY_POOL =
+            Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "yeedar-upload-retry");
+                t.setDaemon(true);   // never hold the game open
+                return t;
+            });
+    /** Confirmed stored vs given up on, so a scan can report what actually
+     *  landed rather than what it read. */
+    private static final AtomicInteger uploaded = new AtomicInteger();
+    private static final AtomicInteger failed = new AtomicInteger();
     private static final int MAX_MESSAGES_PER_WINDOW = 5;
     private static final long WINDOW_MS = 10_000;
 
@@ -123,22 +139,55 @@ public class YeetVisClient {
                 .POST(HttpRequest.BodyPublishers.ofString(GSON.toJson(payload)))
                 .build();
 
+        send(request, rows.size(), 0);
+    }
+
+    /**
+     * POST a batch, retrying on failure.
+     *
+     * <p>A scan of several thousand snitches is a dozen or more batches, and
+     * the first version dropped any that failed: pending was cleared before
+     * the request completed, so a 502 lost 400 snitches silently while the
+     * scan still reported success. Retries make a transient failure survivable;
+     * the counter makes a permanent one visible.
+     */
+    private static void send(HttpRequest request, int count, int attempt) {
         HTTP_CLIENT.sendAsync(request, HttpResponse.BodyHandlers.ofString())
                 .thenAccept(response -> {
                     if (response.statusCode() == 200) {
-                        System.out.println("[Yeedar] Uploaded " + rows.size() + " snitches: " + response.body());
-                        chat("§aUpload complete — " + rows.size() + " snitches sent to YeetVis.");
+                        uploaded.addAndGet(count);
+                        System.out.println("[Yeedar] Uploaded " + count + " snitches: " + response.body());
                     } else {
-                        System.err.println("[Yeedar] jalist upload returned "
-                                + response.statusCode() + ": " + response.body());
-                        chat("§cUpload failed (HTTP " + response.statusCode() + "). Check /yeedar status.");
+                        retryOrGiveUp(request, count, attempt,
+                                "HTTP " + response.statusCode() + " " + response.body());
                     }
                 })
                 .exceptionally(t -> {
-                    System.err.println("[Yeedar] jalist upload failed: " + t.getMessage());
-                    chat("§cUpload failed: " + t.getMessage());
+                    retryOrGiveUp(request, count, attempt, String.valueOf(t.getMessage()));
                     return null;
                 });
+    }
+
+    private static void retryOrGiveUp(HttpRequest request, int count, int attempt, String why) {
+        if (attempt < UPLOAD_RETRIES) {
+            long delay = UPLOAD_RETRY_BASE_MS * (1L << attempt);   // 2s, 4s, 8s
+            System.err.println("[Yeedar] upload of " + count + " failed (" + why
+                    + "); retry " + (attempt + 1) + "/" + UPLOAD_RETRIES + " in " + delay + "ms");
+            RETRY_POOL.schedule(() -> send(request, count, attempt + 1), delay, TimeUnit.MILLISECONDS);
+            return;
+        }
+        failed.addAndGet(count);
+        System.err.println("[Yeedar] gave up on " + count + " snitches: " + why);
+        chat("§c" + count + " snitches failed to upload (" + why + ").");
+    }
+
+    /** Snitches confirmed stored, and given up on, since the counters were reset. */
+    public static int uploadedCount() { return uploaded.get(); }
+    public static int failedCount() { return failed.get(); }
+
+    public static void resetUploadCounters() {
+        uploaded.set(0);
+        failed.set(0);
     }
 
     /**
