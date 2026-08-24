@@ -4,6 +4,7 @@ import com.mojang.brigadier.arguments.DoubleArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.yeedar.api.OAuthCallbackServer;
 import com.yeedar.config.YeedarConfig;
+import com.yeedar.tracker.JalistScanner;
 import com.yeedar.tracker.PlayerTracker;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
@@ -19,6 +20,24 @@ public class YeedarCommands {
     public static void register() {
         ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) -> {
             dispatcher.register(ClientCommandManager.literal("yeedar")
+                    .then(ClientCommandManager.literal("jalist")
+                            .executes(ctx -> {
+                                // Runs /jalist and scans the window it opens;
+                                // the scan itself runs on the client tick.
+                                JalistScanner.getInstance().beginScan();
+                                return 1;
+                            })
+                            .then(ClientCommandManager.argument("group", StringArgumentType.word())
+                                    .executes(ctx -> {
+                                        // /jalist <group> filters server-side, so a
+                                        // large network can be scanned a group at a
+                                        // time instead of in one long fragile run.
+                                        JalistScanner.getInstance()
+                                                .beginScan(StringArgumentType.getString(ctx, "group"));
+                                        return 1;
+                                    })
+                            )
+                    )
                     .then(ClientCommandManager.literal("login")
                             .executes(ctx -> {
                                 YeedarConfig config = YeedarConfig.getInstance();

@@ -16,6 +16,12 @@ repositories {
 }
 
 dependencies {
+    // Paging logic is pulled out into plain Java (JalistPager) precisely so it
+    // can be tested without a running game.
+    testImplementation platform('org.junit:junit-bom:5.10.2')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+
     minecraft "com.mojang:minecraft:${project.minecraft_version}"
     mappings "net.fabricmc:yarn:${project.yarn_mappings}:v2"
     modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
@@ -56,4 +62,9 @@ modrinth {
     dependencies {
         required.project "fabric-api"
     }
+}
+
+test {
+    useJUnitPlatform()
+    testLogging { events "passed", "failed" }
 }
