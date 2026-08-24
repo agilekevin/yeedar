@@ -105,10 +105,13 @@ public class JalistScanner {
         // Check this before scanning, not after. A 150-page scan takes minutes,
         // and uploading used to fail silently when unconfigured — a user could
         // watch the whole thing succeed and lose every snitch of it.
-        String why = YeetVisClient.unconfiguredReason();
+        var why = YeetVisClient.unconfiguredReason();
         if (why != null) {
-            feedback("§cCannot upload — " + why);
-            feedback("§7Nothing was scanned. Fix that first, then run this again.");
+            // Say this before scanning. Reading 150 pages and then discarding
+            // every snitch is a far worse way to learn you are logged out.
+            feedback("§c✖ " + why.problem());
+            feedback("§7" + why.fix());
+            feedback("§8Nothing was scanned — no time wasted.");
             return;
         }
         active = true;

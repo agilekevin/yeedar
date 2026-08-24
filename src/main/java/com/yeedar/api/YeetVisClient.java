@@ -104,13 +104,13 @@ public class YeetVisClient {
         String baseUrl = config.getApiBaseUrl();
         String token = config.getToken();
 
-        String why = unconfiguredReason();
+        Unconfigured why = unconfiguredReason();
         if (why != null) {
             // This used to return silently to stderr, which is how a 150-page
             // scan could report success having sent nothing at all.
-            System.err.println("[Yeedar] skipping jalist upload — " + why);
+            System.err.println("[Yeedar] skipping jalist upload — " + why.problem());
             failed.addAndGet(entries.size());
-            chat("§c" + entries.size() + " snitches not uploaded — " + why);
+            chat("§c" + entries.size() + " snitches were not uploaded. " + why.problem());
             return;
         }
 
@@ -147,13 +147,29 @@ public class YeetVisClient {
         send(request, rows.size(), 0);
     }
 
-    /** Why uploads cannot be sent, or null when they can. */
-    public static String unconfiguredReason() {
+    /**
+     * Why uploads cannot be sent, or null when they can.
+     *
+     * <p>Two lines: what is wrong, and the command that fixes it. This is the
+     * one failure a player can resolve unaided, so it is worth saying properly
+     * rather than in shorthand.
+     */
+    public record Unconfigured(String problem, String fix) { }
+
+    public static Unconfigured unconfiguredReason() {
         YeedarConfig config = YeedarConfig.getInstance();
         String baseUrl = config.getApiBaseUrl();
         String token = config.getToken();
-        if (baseUrl == null || baseUrl.isEmpty()) return "no API URL set (/yeedar api <url>)";
-        if (token == null || token.isEmpty()) return "not logged in (/yeedar login)";
+        if (baseUrl == null || baseUrl.isEmpty()) {
+            return new Unconfigured(
+                    "Yeedar does not know where YeetVis is.",
+                    "Set it with §f/yeedar api <url>§7, then run §f/yeedar login§7.");
+        }
+        if (token == null || token.isEmpty()) {
+            return new Unconfigured(
+                    "You are not logged in, so Yeedar cannot upload anything.",
+                    "Run §f/yeedar login§7 to connect your Discord account, then try again.");
+        }
         return null;
     }
 
