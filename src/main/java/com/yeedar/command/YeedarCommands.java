@@ -13,9 +13,22 @@ import net.minecraft.util.Util;
 
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 public class YeedarCommands {
+
+    /** Split "yeet, yeetistan" or "yeet yeetistan" into namelayer names. */
+    static List<String> parseGroups(String raw) {
+        List<String> out = new ArrayList<>();
+        for (String part : raw.split("[,\\s]+")) {
+            String name = part.trim().toLowerCase();
+            if (!name.isEmpty() && !out.contains(name)) out.add(name);
+        }
+        return out;
+    }
+
 
     public static void register() {
         ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) -> {
@@ -27,13 +40,14 @@ public class YeedarCommands {
                                 JalistScanner.getInstance().beginScan();
                                 return 1;
                             })
-                            .then(ClientCommandManager.argument("group", StringArgumentType.word())
+                            .then(ClientCommandManager.argument("groups", StringArgumentType.greedyString())
                                     .executes(ctx -> {
-                                        // /jalist <group> filters server-side, so a
-                                        // large network can be scanned a group at a
-                                        // time instead of in one long fragile run.
-                                        JalistScanner.getInstance()
-                                                .beginScan(StringArgumentType.getString(ctx, "group"));
+                                        // Accepts several namelayers, separated by
+                                        // spaces or commas: JukeAlert filters
+                                        // server-side, so scanning group by group
+                                        // keeps each pass short.
+                                        JalistScanner.getInstance().beginScan(
+                                                parseGroups(StringArgumentType.getString(ctx, "groups")));
                                         return 1;
                                     })
                             )

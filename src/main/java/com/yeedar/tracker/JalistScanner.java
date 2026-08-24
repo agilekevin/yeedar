@@ -8,7 +8,9 @@ import net.minecraft.item.Items;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.text.Text;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -48,14 +50,23 @@ public class JalistScanner {
     private boolean active = false;
     private boolean armed = false;
     private int armedTicks = 0;
-    private String scanGroup = null;
     private JalistPager pager;
+    /** Namelayers still to scan. Empty with currentGroup null means one
+     *  unfiltered pass over everything the player can see. */
+    private final Deque<String> queue = new ArrayDeque<>();
+    private String currentGroup = null;
+    private final List<String> done = new ArrayList<>();
+    private int groupStartCount = 0;
+    private int totalPages = 0;
 
     /** Positions seen this scan, so a repeat across pages is never re-sent. */
     private final Set<String> seenKeys = new HashSet<>();
     /** Read but not yet uploaded; flushed in batches so a long scan makes
      *  durable progress instead of risking everything on one final request. */
     private final List<JalistEntry> pending = new ArrayList<>();
+    /** Everything read this scan, kept for the closing group breakdown —
+     *  `pending` is emptied by each flush. */
+    private final List<JalistEntry> allEntries = new ArrayList<>();
 
     public static JalistScanner getInstance() {
         return INSTANCE;
@@ -66,16 +77,17 @@ public class JalistScanner {
     }
 
     public void beginScan() {
-        beginScan(null);
+        beginScan(List.of());
     }
 
     /**
-     * Scan one namelayer group, or everything when group is null.
+     * Scan the given namelayer groups in turn, or everything when the list is
+     * empty.
      *
-     * <p>Per-group is the more reliable route for a large network: /jalist
-     * &lt;group&gt; filters server-side, so each run has far fewer pages.
+     * <p>Per-group is the more reliable route for a large network: JukeAlert
+     * filters server-side, so each pass has far fewer pages to work through.
      */
-    public void beginScan(String group) {
+    public void beginScan(List<String> groups) {
         MinecraftClient mc = MinecraftClient.getInstance();
         if (active) {
             feedback("§eScan already running.");
@@ -86,16 +98,36 @@ public class JalistScanner {
             return;
         }
         active = true;
-        armed = true;
-        armedTicks = 0;
-        scanGroup = group;
-        pager = new JalistPager(GAP_TICKS, WAIT_TICKS, MAX_RETRIES,
-                REOPEN_GRACE_TICKS, MAX_PAGES);
         seenKeys.clear();
         pending.clear();
+        allEntries.clear();
+        queue.clear();
+        done.clear();
+        totalPages = 0;
+        queue.addAll(groups);
 
-        feedback(group == null ? "§7Running /jalist..." : "§7Running /jalist " + group + "...");
-        mc.player.networkHandler.sendChatCommand(group == null ? "jalist" : "jalist " + group);
+        if (groups.isEmpty()) {
+            feedback("§7Scanning every snitch you can see...");
+        } else {
+            feedback("§7Scanning " + groups.size() + " namelayer"
+                    + (groups.size() == 1 ? "" : "s") + ": §f" + String.join("§7, §f", groups));
+        }
+        startNextGroup(mc);
+    }
+
+    /** Kick off the next queued namelayer, or the single unfiltered pass. */
+    private void startNextGroup(MinecraftClient mc) {
+        currentGroup = queue.poll();
+        armed = true;
+        armedTicks = 0;
+        groupStartCount = seenKeys.size();
+        pager = new JalistPager(GAP_TICKS, WAIT_TICKS, MAX_RETRIES,
+                REOPEN_GRACE_TICKS, MAX_PAGES);
+        if (currentGroup != null) {
+            feedback("§7→ " + currentGroup + "...");
+        }
+        mc.player.networkHandler.sendChatCommand(
+                currentGroup == null ? "jalist" : "jalist " + currentGroup);
     }
 
     /** Called every client tick; a cheap no-op unless a scan is running. */
@@ -107,9 +139,11 @@ public class JalistScanner {
             if (isJalistOpen(mc)) {
                 armed = false;
             } else if (++armedTicks > ARM_TIMEOUT_TICKS) {
-                active = false;
                 armed = false;
-                feedback("§cJukeAlert never opened a window — are you on EdenMC?");
+                feedback(currentGroup == null
+                        ? "§cJukeAlert never opened a window — are you on EdenMC?"
+                        : "§e" + currentGroup + " — no window opened (no access to that group?)");
+                endGroup(MinecraftClient.getInstance());
             }
             return;
         }
@@ -168,6 +202,7 @@ public class JalistScanner {
                 parsed++;
                 if (seenKeys.add(entry.key())) {
                     pending.add(entry);
+                    allEntries.add(entry);
                     added++;
                 }
             }
@@ -209,18 +244,50 @@ public class JalistScanner {
     }
 
     private void finish(String message) {
-        active = false;
-        armed = false;
         if (message != null) feedback(message);
-        if (seenKeys.isEmpty()) {
-            feedback("§eNo snitches found — is this actually the jalist window?");
+        endGroup(MinecraftClient.getInstance());
+    }
+
+    /**
+     * Wrap up the current namelayer, then move to the next or end the scan.
+     *
+     * <p>Each group is reported as it completes rather than only at the end: a
+     * multi-group scan takes a while, and knowing which namelayers are already
+     * safely uploaded matters if it stops early.
+     */
+    private void endGroup(MinecraftClient mc) {
+        armed = false;
+        int found = seenKeys.size() - groupStartCount;
+        int pages = pager == null ? 0 : pager.pagesRead();
+        totalPages += pages;
+
+        if (currentGroup != null) {
+            done.add(currentGroup);
+            feedback(String.format("§a✔ %s — %d snitch%s across %d page%s",
+                    currentGroup, found, found == 1 ? "" : "es", pages, pages == 1 ? "" : "s"));
+        }
+        // Upload as each group finishes so a scan that stops early still lands
+        // everything it has already read.
+        flush();
+
+        if (!queue.isEmpty()) {
+            startNextGroup(mc);
             return;
         }
-        int pages = pager.pagesRead();
-        feedback(String.format("§aRead %d snitches across %d page%s. Uploading...",
-                seenKeys.size(), pages, pages == 1 ? "" : "s"));
+
+        active = false;
+        if (seenKeys.isEmpty()) {
+            feedback("§eNo snitches found — check the namelayer names.");
+            return;
+        }
+        if (done.isEmpty()) {
+            feedback(String.format("§aDone — %d snitches across %d page%s.",
+                    seenKeys.size(), totalPages, totalPages == 1 ? "" : "s"));
+        } else {
+            feedback(String.format("§aDone — %d snitches from §f%s§a.",
+                    seenKeys.size(), String.join("§a, §f", done)));
+        }
         logGroupBreakdown();
-        flush();
     }
 
     /**
@@ -230,11 +297,11 @@ public class JalistScanner {
      */
     private void logGroupBreakdown() {
         TreeMap<String, Integer> counts = new TreeMap<>();
-        for (JalistEntry e : pending) {
+        for (JalistEntry e : allEntries) {
             counts.merge(e.group == null ? "(none)" : e.group, 1, Integer::sum);
         }
         if (counts.isEmpty()) return;
-        StringBuilder sb = new StringBuilder("[Yeedar] groups in final batch:");
+        StringBuilder sb = new StringBuilder("[Yeedar] groups scanned:");
         counts.forEach((g, n) -> sb.append(' ').append(g).append('=').append(n));
         System.out.println(sb);
     }
