@@ -20,7 +20,11 @@ public class YeedarConfig {
     private String username = "";
     private double detectionRange = 128.0;
     private boolean trackingEnabled = true;
-    private List<String> ignoredNames = new ArrayList<>(List.of("FreeCam"));
+    // Freecam mods spawn a fake player at your body while the camera flies free.
+    // Reporting it reads as a sighting of yourself standing still. The two names
+    // below are what the common Fabric freecam mods use; matching is
+    // case-insensitive, so only genuinely different names need listing.
+    private List<String> ignoredNames = new ArrayList<>(List.of("FreeCam", "FreeCamera"));
 
     public static YeedarConfig getInstance() {
         if (instance == null) {
