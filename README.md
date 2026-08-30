@@ -79,6 +79,9 @@ That's it — once logged in, tracking runs automatically while you play.
 | `/yeedar toggle` | Turn player tracking on or off. |
 | `/yeedar status` | Show tracking state, login, API URL, range, and tracked count. |
 | `/yeedar list` | List players currently in range and their positions. |
+| `/yeedar ignore` | Show the names Yeedar never reports. |
+| `/yeedar ignore add <name>` | Stop reporting a name (e.g. a freecam mod's fake player). |
+| `/yeedar ignore remove <name>` | Report that name again. |
 | `/yeedar jalist` | Scan every snitch you can see and upload their timers. |
 | `/yeedar jalist <groups...>` | Scan specific namelayer groups (space or comma separated). |
 | `/yeedar jalist --all` | Scan every snitch you can see, ignoring the defaults. |

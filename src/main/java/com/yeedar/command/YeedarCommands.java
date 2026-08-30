@@ -29,6 +29,57 @@ public class YeedarCommands {
         return out;
     }
 
+    /**
+     * Add {@code name} to {@code names} unless something matching it is already
+     * listed.
+     *
+     * <p>Matching mirrors {@link YeedarConfig#isIgnored}, which compares with
+     * {@code equalsIgnoreCase}. Storing "freecam" beside "FreeCam" would be a
+     * second entry that can never match anything the first one misses, so this
+     * treats it as already present rather than growing the list.
+     *
+     * @return true if the list changed
+     */
+    static boolean addIgnored(List<String> names, String name) {
+        if (names == null || name == null) return false;
+        String trimmed = name.trim();
+        if (trimmed.isEmpty()) return false;
+        for (String existing : names) {
+            if (existing != null && existing.equalsIgnoreCase(trimmed)) return false;
+        }
+        names.add(trimmed);
+        return true;
+    }
+
+    /**
+     * Remove every entry matching {@code name}, ignoring case.
+     *
+     * <p>Every match, not the first: a config hand-edited before this command
+     * existed can hold both "FreeCam" and "freecam", and removing one while
+     * leaving the other would look like the command had done nothing.
+     *
+     * @return true if the list changed
+     */
+    static boolean removeIgnored(List<String> names, String name) {
+        if (names == null || name == null) return false;
+        String trimmed = name.trim();
+        if (trimmed.isEmpty()) return false;
+        return names.removeIf(existing -> existing != null && existing.equalsIgnoreCase(trimmed));
+    }
+
+    /** Render the ignore list for chat, or a hint when it is empty. */
+    private static Text ignoreListText(List<String> names) {
+        if (names.isEmpty()) {
+            return Text.literal("\u00a77No ignored names. \u00a7fFreecam mods report a fake "
+                    + "player at your body \u00a77\u2014 add its name with "
+                    + "\u00a7f/yeedar ignore add <name>\u00a77.");
+        }
+        StringBuilder sb = new StringBuilder("\u00a76--- Ignored Names (" + names.size() + ") ---");
+        for (String n : names) sb.append("\n\u00a7f").append(n);
+        sb.append("\n\u00a77Never reported as sightings. Matching is case-insensitive.");
+        return Text.literal(sb.toString());
+    }
+
 
     public static void register() {
         ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) -> {
@@ -138,6 +189,59 @@ public class YeedarCommands {
                                 ctx.getSource().sendFeedback(Text.literal("Yeedar tracking " + state));
                                 return 1;
                             })
+                    )
+                    .then(ClientCommandManager.literal("ignore")
+                            // Bare form lists, so the read-only case needs no
+                            // subcommand — same shape as `/yeedar list`.
+                            .executes(ctx -> {
+                                ctx.getSource().sendFeedback(
+                                        ignoreListText(YeedarConfig.getInstance().getIgnoredNames()));
+                                return 1;
+                            })
+                            .then(ClientCommandManager.literal("list")
+                                    .executes(ctx -> {
+                                        ctx.getSource().sendFeedback(
+                                                ignoreListText(YeedarConfig.getInstance().getIgnoredNames()));
+                                        return 1;
+                                    })
+                            )
+                            .then(ClientCommandManager.literal("add")
+                                    .then(ClientCommandManager.argument("name", StringArgumentType.word())
+                                            .executes(ctx -> {
+                                                String name = StringArgumentType.getString(ctx, "name");
+                                                YeedarConfig config = YeedarConfig.getInstance();
+                                                if (addIgnored(config.getIgnoredNames(), name)) {
+                                                    config.save();
+                                                    ctx.getSource().sendFeedback(Text.literal(
+                                                            "\u00a7aIgnoring \u00a7f" + name
+                                                            + "\u00a7a \u2014 it will no longer be reported."));
+                                                } else {
+                                                    ctx.getSource().sendFeedback(Text.literal(
+                                                            "\u00a77Already ignored: \u00a7f" + name
+                                                            + "\u00a77 (matching ignores case)."));
+                                                }
+                                                return 1;
+                                            })
+                                    )
+                            )
+                            .then(ClientCommandManager.literal("remove")
+                                    .then(ClientCommandManager.argument("name", StringArgumentType.word())
+                                            .executes(ctx -> {
+                                                String name = StringArgumentType.getString(ctx, "name");
+                                                YeedarConfig config = YeedarConfig.getInstance();
+                                                if (removeIgnored(config.getIgnoredNames(), name)) {
+                                                    config.save();
+                                                    ctx.getSource().sendFeedback(Text.literal(
+                                                            "\u00a7aNo longer ignoring \u00a7f" + name
+                                                            + "\u00a7a \u2014 it will be reported again."));
+                                                } else {
+                                                    ctx.getSource().sendFeedback(Text.literal(
+                                                            "\u00a7cNot in the ignore list: \u00a7f" + name));
+                                                }
+                                                return 1;
+                                            })
+                                    )
+                            )
                     )
                     .then(ClientCommandManager.literal("status")
                             .executes(ctx -> {
