@@ -95,7 +95,13 @@ public class YeedarConfig {
         this.trackingEnabled = trackingEnabled;
     }
 
+    /**
+     * The live ignore list, never null so callers can mutate it directly.
+     * A config file carrying an explicit {@code "ignoredNames": null} would
+     * otherwise hand back null and break `/yeedar ignore add`.
+     */
     public List<String> getIgnoredNames() {
+        if (ignoredNames == null) ignoredNames = new ArrayList<>();
         return ignoredNames;
     }
 
