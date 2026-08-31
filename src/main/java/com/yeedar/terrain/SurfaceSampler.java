@@ -5,6 +5,7 @@ import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.ChunkPos;
+import net.minecraft.registry.Registries;
 import net.minecraft.world.Heightmap;
 import net.minecraft.world.chunk.WorldChunk;
 
@@ -121,8 +122,17 @@ public final class SurfaceSampler {
                     state = world.getBlockState(cursor.set(worldX, y, worldZ));
                 }
 
+                // Both the block and the colour vanilla gives it. The colour
+                // alone cannot separate blocks that share one — mycelium and
+                // purple wool are both MapColor.PURPLE — and re-deriving a
+                // colour later from the block is a re-render, where changing
+                // what was captured would be a re-capture.
+                //
+                // The registry's namespaced id, never its numeric one: numeric
+                // ids are assigned at runtime and move between versions.
+                String blockId = Registries.BLOCK.getId(state.getBlock()).toString();
                 int mapColor = state.getMapColor(world, cursor).id;
-                planes.set(ChunkPlanes.index(x, z), mapColor, y, top);
+                planes.set(ChunkPlanes.index(x, z), blockId, mapColor, y, top);
             }
         }
         return planes;

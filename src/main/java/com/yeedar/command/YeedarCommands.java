@@ -315,7 +315,8 @@ public class YeedarCommands {
                                                 config.setMappingRadius(chunks);
                                                 config.save();
                                                 MinecraftClient client = MinecraftClient.getInstance();
-                                                int view = client.options.getClampedViewDistance();
+                                                int mine = client.options.getViewDistance().getValue();
+                                                int server = TerrainCapture.serverViewDistance(client);
                                                 StringBuilder msg = new StringBuilder(
                                                         "\u00a7aMapping radius set to " + chunks
                                                         + " chunks. \u00a77Full pass ~"
@@ -325,11 +326,10 @@ public class YeedarCommands {
                                                 // chunks are simply never loaded — but
                                                 // saying so beats wondering why the
                                                 // map stops at the same place.
-                                                if (chunks > view) {
-                                                    msg.append(" \u00a7eBeyond your render distance of ")
-                                                       .append(view)
-                                                       .append("; those chunks are never loaded, so they")
-                                                       .append(" cannot be mapped.");
+                                                String reach = TerrainCapture.reachNote(
+                                                        chunks, mine, server);
+                                                if (reach != null) {
+                                                    msg.append(" \u00a7e").append(reach);
                                                 }
                                                 if (chunks > TerrainCapture.smoothMaxRadius()) {
                                                     msg.append(" \u00a7eWider than the sweep can cover at")
@@ -339,7 +339,7 @@ public class YeedarCommands {
                                                        .append(" blocks/s, so travelling fast will leave")
                                                        .append(" holes.");
                                                 }
-                                                if (chunks > view
+                                                if (reach != null
                                                         || chunks > TerrainCapture.smoothMaxRadius()) {
                                                     msg.append(" \u00a7f/yeedar mapping range auto")
                                                        .append("\u00a7e picks the widest safe radius.");
