@@ -1,6 +1,7 @@
 package com.yeedar.command;
 
 import com.mojang.brigadier.arguments.DoubleArgumentType;
+import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.yeedar.api.OAuthCallbackServer;
 import com.yeedar.api.YeetVisClient;
@@ -10,6 +11,7 @@ import com.yeedar.tracker.JalistScanner;
 import com.yeedar.tracker.PlayerTracker;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
+import net.minecraft.client.MinecraftClient;
 import net.minecraft.text.Text;
 import net.minecraft.util.Util;
 
@@ -88,6 +90,21 @@ public class YeedarCommands {
         StringBuilder sb = new StringBuilder("\u00a76--- Terrain mapping ---\n"
                 + "\u00a77State: " + (on ? "\u00a7aON" : "\u00a7cOFF") + "\n"
                 + "\u00a77Queued chunks: \u00a7f" + capture.pending() + "\n");
+        int configured = YeedarConfig.getInstance().getMappingRadius();
+        int radius = capture.currentRadius(MinecraftClient.getInstance());
+        sb.append("\u00a77Radius: \u00a7f").append(radius).append(" chunks\u00a77")
+          .append(configured > 0 ? "" : " (following your render distance)")
+          .append(", full pass ~").append(TerrainCapture.fullPassSeconds(radius))
+          .append("s\n");
+        // The number that decides whether the map comes out patchy, so it goes
+        // next to the radius rather than being something to work out.
+        double keepsUp = TerrainCapture.keepsUpWith(radius);
+        boolean patchy = keepsUp < TerrainCapture.FAST_HORSE_BPS;
+        sb.append(patchy ? "\u00a7e" : "\u00a77").append("Complete up to ")
+          .append(String.format("%.0f", keepsUp)).append(" blocks/s")
+          .append(patchy ? " \u2014 below horse speed, so travelling fast will leave holes"
+                         : " (a fast horse does " + Math.round(TerrainCapture.FAST_HORSE_BPS) + ")")
+          .append("\n");
         // A queue that is not draining is the one thing worth surfacing here.
         // It used to be visible only on stderr, which no player reads, so a
         // revoked token looked exactly like a working feature with nothing
@@ -264,6 +281,73 @@ public class YeedarCommands {
                                         ctx.getSource().sendFeedback(mappingStatus());
                                         return 1;
                                     })
+                            )
+                            .then(ClientCommandManager.literal("range")
+                                    // Bare form explains rather than errors: the
+                                    // useful answer to "what is my range" is the
+                                    // number plus what it costs, which is what
+                                    // the status readout already says.
+                                    .executes(ctx -> {
+                                        ctx.getSource().sendFeedback(mappingStatus());
+                                        return 1;
+                                    })
+                                    .then(ClientCommandManager.literal("auto")
+                                            .executes(ctx -> {
+                                                YeedarConfig config = YeedarConfig.getInstance();
+                                                config.setMappingRadius(0);
+                                                config.save();
+                                                int radius = TerrainCapture.getInstance()
+                                                        .currentRadius(MinecraftClient.getInstance());
+                                                ctx.getSource().sendFeedback(Text.literal(
+                                                        "\u00a7aMapping radius follows your render distance"
+                                                        + " \u00a77(now " + radius + " chunks, full pass ~"
+                                                        + TerrainCapture.fullPassSeconds(radius) + "s)."));
+                                                return 1;
+                                            })
+                                    )
+                                    .then(ClientCommandManager.argument("chunks",
+                                                    IntegerArgumentType.integer(
+                                                            TerrainCapture.MIN_RADIUS,
+                                                            TerrainCapture.MAX_RADIUS))
+                                            .executes(ctx -> {
+                                                int chunks = IntegerArgumentType.getInteger(ctx, "chunks");
+                                                YeedarConfig config = YeedarConfig.getInstance();
+                                                config.setMappingRadius(chunks);
+                                                config.save();
+                                                MinecraftClient client = MinecraftClient.getInstance();
+                                                int view = client.options.getClampedViewDistance();
+                                                StringBuilder msg = new StringBuilder(
+                                                        "\u00a7aMapping radius set to " + chunks
+                                                        + " chunks. \u00a77Full pass ~"
+                                                        + TerrainCapture.fullPassSeconds(chunks) + "s.");
+                                                // Asking for more than the client is
+                                                // sent is not an error — the extra
+                                                // chunks are simply never loaded — but
+                                                // saying so beats wondering why the
+                                                // map stops at the same place.
+                                                if (chunks > view) {
+                                                    msg.append(" \u00a7eBeyond your render distance of ")
+                                                       .append(view)
+                                                       .append("; those chunks are never loaded, so they")
+                                                       .append(" cannot be mapped.");
+                                                }
+                                                if (chunks > TerrainCapture.smoothMaxRadius()) {
+                                                    msg.append(" \u00a7eWider than the sweep can cover at")
+                                                       .append(" speed \u2014 complete only up to ")
+                                                       .append(String.format("%.0f",
+                                                               TerrainCapture.keepsUpWith(chunks)))
+                                                       .append(" blocks/s, so travelling fast will leave")
+                                                       .append(" holes.");
+                                                }
+                                                if (chunks > view
+                                                        || chunks > TerrainCapture.smoothMaxRadius()) {
+                                                    msg.append(" \u00a7f/yeedar mapping range auto")
+                                                       .append("\u00a7e picks the widest safe radius.");
+                                                }
+                                                ctx.getSource().sendFeedback(Text.literal(msg.toString()));
+                                                return 1;
+                                            })
+                                    )
                             )
                     )
                     .then(ClientCommandManager.literal("ignore")

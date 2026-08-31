@@ -24,6 +24,12 @@ public class YeedarConfig {
     // reveals where you have been and when. The rules allow it; the point is
     // that nobody contributes location data without choosing to.
     private boolean mappingEnabled = false;
+    // 0 means "follow the render distance". Sampling can only ever read chunks
+    // the client already holds, so the render distance is the real boundary —
+    // a larger number buys nothing, and a fixed smaller one throws away chunks
+    // the player was already sent. An explicit value overrides, for anyone who
+    // wants to map a tighter area than they render.
+    private int mappingRadius = 0;
     // Freecam mods spawn a fake player at your body while the camera flies free.
     // Reporting it reads as a sighting of yourself standing still. The two names
     // below are what the common Fabric freecam mods use; matching is
@@ -97,6 +103,15 @@ public class YeedarConfig {
 
     public void setTrackingEnabled(boolean trackingEnabled) {
         this.trackingEnabled = trackingEnabled;
+    }
+
+    /** Sampling radius in chunks, or 0 to follow the render distance. */
+    public int getMappingRadius() {
+        return mappingRadius;
+    }
+
+    public void setMappingRadius(int mappingRadius) {
+        this.mappingRadius = mappingRadius;
     }
 
     public boolean isMappingEnabled() {
