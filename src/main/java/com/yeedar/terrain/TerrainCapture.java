@@ -29,6 +29,7 @@ public final class TerrainCapture {
     private static final int SAMPLE_RADIUS = 6;
 
     private final TerrainBuffer buffer = new TerrainBuffer();
+    private final UploadBackoff backoff = new UploadBackoff();
     private int sampleCounter = 0;
     private int uploadCounter = 0;
     private Object lastWorld = null;
@@ -40,6 +41,14 @@ public final class TerrainCapture {
 
     public int pending() { return buffer.pending(); }
 
+    /** Upload intervals left before the next attempt; 0 when uploads are
+     *  flowing. Surfaced by /yeedar mapping so a stalled upload is visible in
+     *  game rather than only in the log. */
+    public int uploadSkipsRemaining() { return backoff.skipsRemaining(); }
+
+    /** Seconds between upload attempts, for describing the wait to the player. */
+    public static int uploadIntervalSeconds() { return UPLOAD_INTERVAL / 20; }
+
     public void tick(MinecraftClient client) {
         if (client.world == null || client.player == null) {
             if (lastWorld != null) { buffer.reset(); lastWorld = null; }
@@ -47,7 +56,14 @@ public final class TerrainCapture {
         }
         // A dimension change or reconnect invalidates every hash we hold — the
         // same chunk coordinates mean somewhere else entirely.
-        if (lastWorld != client.world) { buffer.reset(); lastWorld = client.world; }
+        if (lastWorld != client.world) {
+            buffer.reset();
+            // A new world is a new attempt: whatever was failing was about
+            // somewhere else, and making the player wait out an inherited
+            // hour-long penalty would look like the feature is broken.
+            backoff.succeeded();
+            lastWorld = client.world;
+        }
 
         if (!YeedarConfig.getInstance().isMappingEnabled()) return;
 
@@ -116,10 +132,16 @@ public final class TerrainCapture {
 
     private void flush() {
         if (buffer.pending() == 0) return;
+        // Ask the backoff only when there is something to send, so sitting in
+        // already-mapped terrain with an empty queue does not burn down a
+        // penalty that was never served.
+        if (!backoff.allow()) return;
         try {
             List<ChunkPlanes> batch = buffer.drain(TerrainUploader.MAX_BATCH);
-            TerrainUploader.upload(batch, buffer);
+            TerrainUploader.upload(batch, buffer,
+                    ok -> { if (ok) backoff.succeeded(); else backoff.failed(); });
         } catch (RuntimeException e) {
+            backoff.failed();
             // uploadTerrain builds a URI from the configured API URL
             // synchronously; a malformed /yeedar api value throws before any
             // future is even created. That must not crash the game over a
