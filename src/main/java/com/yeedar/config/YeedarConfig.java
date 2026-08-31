@@ -20,6 +20,10 @@ public class YeedarConfig {
     private String username = "";
     private double detectionRange = 128.0;
     private boolean trackingEnabled = true;
+    // Off by default, deliberately. Uploading which chunks you have loaded
+    // reveals where you have been and when. The rules allow it; the point is
+    // that nobody contributes location data without choosing to.
+    private boolean mappingEnabled = false;
     // Freecam mods spawn a fake player at your body while the camera flies free.
     // Reporting it reads as a sighting of yourself standing still. The two names
     // below are what the common Fabric freecam mods use; matching is
@@ -93,6 +97,14 @@ public class YeedarConfig {
 
     public void setTrackingEnabled(boolean trackingEnabled) {
         this.trackingEnabled = trackingEnabled;
+    }
+
+    public boolean isMappingEnabled() {
+        return mappingEnabled;
+    }
+
+    public void setMappingEnabled(boolean mappingEnabled) {
+        this.mappingEnabled = mappingEnabled;
     }
 
     /**

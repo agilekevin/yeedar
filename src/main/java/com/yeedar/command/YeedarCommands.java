@@ -4,6 +4,7 @@ import com.mojang.brigadier.arguments.DoubleArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.yeedar.api.OAuthCallbackServer;
 import com.yeedar.config.YeedarConfig;
+import com.yeedar.terrain.TerrainCapture;
 import com.yeedar.tracker.JalistScanner;
 import com.yeedar.tracker.PlayerTracker;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
@@ -80,6 +81,14 @@ public class YeedarCommands {
         return Text.literal(sb.toString());
     }
 
+    private static Text mappingStatus() {
+        boolean on = YeedarConfig.getInstance().isMappingEnabled();
+        return Text.literal("\u00a76--- Terrain mapping ---\n"
+                + "\u00a77State: " + (on ? "\u00a7aON" : "\u00a7cOFF") + "\n"
+                + "\u00a77Queued chunks: \u00a7f" + TerrainCapture.getInstance().pending() + "\n"
+                + "\u00a77Uploading the chunks you load keeps the map current, and\n"
+                + "\u00a77records where you have been. It is off unless you turn it on.");
+    }
 
     public static void register() {
         ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) -> {
@@ -189,6 +198,41 @@ public class YeedarCommands {
                                 ctx.getSource().sendFeedback(Text.literal("Yeedar tracking " + state));
                                 return 1;
                             })
+                    )
+                    .then(ClientCommandManager.literal("mapping")
+                            .executes(ctx -> {
+                                ctx.getSource().sendFeedback(mappingStatus());
+                                return 1;
+                            })
+                            .then(ClientCommandManager.literal("on")
+                                    .executes(ctx -> {
+                                        YeedarConfig config = YeedarConfig.getInstance();
+                                        config.setMappingEnabled(true);
+                                        config.save();
+                                        ctx.getSource().sendFeedback(Text.literal(
+                                                "\u00a7aTerrain mapping on. \u00a77Chunks you load are "
+                                                + "sampled and uploaded so the map stays current — which "
+                                                + "also records where you have been. \u00a7f/yeedar mapping off"
+                                                + "\u00a77 stops it."));
+                                        return 1;
+                                    })
+                            )
+                            .then(ClientCommandManager.literal("off")
+                                    .executes(ctx -> {
+                                        YeedarConfig config = YeedarConfig.getInstance();
+                                        config.setMappingEnabled(false);
+                                        config.save();
+                                        ctx.getSource().sendFeedback(Text.literal(
+                                                "\u00a7cTerrain mapping off. \u00a77Nothing further is uploaded."));
+                                        return 1;
+                                    })
+                            )
+                            .then(ClientCommandManager.literal("status")
+                                    .executes(ctx -> {
+                                        ctx.getSource().sendFeedback(mappingStatus());
+                                        return 1;
+                                    })
+                            )
                     )
                     .then(ClientCommandManager.literal("ignore")
                             // Bare form lists, so the read-only case needs no
