@@ -38,7 +38,12 @@ public final class TerrainBuffer {
 
     public TerrainBuffer(int maxPending) { this.maxPending = maxPending; }
 
-    /** Pack two signed ints into one long without aliasing negatives. */
+    /**
+     * Pack two signed ints into disjoint halves of one long: cx in the high
+     * 32 bits, cz masked into the low 32. The two halves never overlap, so
+     * this isn't working around any aliasing between negative coordinates —
+     * OR and XOR are equivalent here and either would be correct.
+     */
     private static long key(int cx, int cz) {
         return ((long) cx << 32) | (cz & 0xFFFFFFFFL);
     }
