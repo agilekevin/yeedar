@@ -77,9 +77,12 @@ That's it — once logged in, tracking runs automatically while you play.
 | `/yeedar api <url>` | Set the backend API base URL. |
 | `/yeedar range <blocks>` | Set the detection range in blocks (1–512, default 128). |
 | `/yeedar toggle` | Turn player tracking on or off. |
-| `/yeedar mapping` | Show whether terrain mapping is on, how many chunks are queued, and whether uploads are landing. |
+| `/yeedar mapping` | Show whether terrain mapping is on, the radius, how many chunks are queued, and whether uploads are landing. |
 | `/yeedar mapping on` | Start sampling loaded chunks and uploading them. Off by default; needs a login. |
 | `/yeedar mapping off` | Stop. |
+| `/yeedar mapping range` | Show the sampling radius and how long a full pass takes. |
+| `/yeedar mapping range <chunks>` | Sample this many chunks out (1–32). |
+| `/yeedar mapping range auto` | Follow your render distance. The default. |
 | `/yeedar status` | Show tracking state, login, API URL, range, and tracked count. |
 | `/yeedar list` | List players currently in range and their positions. |
 | `/yeedar ignore` | Show the names Yeedar never reports. |

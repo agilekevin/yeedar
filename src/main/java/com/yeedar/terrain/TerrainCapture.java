@@ -25,8 +25,12 @@ public final class TerrainCapture {
     private static final int UPLOAD_INTERVAL = 200;
     /** Chunks sampled per sweep, so one tick never samples a whole view. */
     private static final int CHUNKS_PER_SWEEP = 8;
-    /** How far out to sample, in chunks. Well inside a normal render distance. */
-    private static final int SAMPLE_RADIUS = 6;
+    /** Smallest useful window: the 3x3 the player is standing in. */
+    public static final int MIN_RADIUS = 1;
+    /** Vanilla's maximum render distance, and so the most chunks a client can
+     *  ever hold. A larger radius would only walk coordinates that are always
+     *  unloaded, slowing the sweep's return to real chunks for nothing. */
+    public static final int MAX_RADIUS = 32;
 
     private final TerrainBuffer buffer = new TerrainBuffer();
     private final UploadBackoff backoff = new UploadBackoff();
@@ -36,6 +40,10 @@ public final class TerrainCapture {
     /** Where the last sweep stopped, so successive sweeps cover the whole
      *  window instead of re-reading its first few chunks forever. */
     private int sweepCursor = 0;
+    /** The radius the cursor is an index into. When the radius changes the
+     *  window is a different size and the old position means somewhere else,
+     *  so the walk restarts rather than resuming into the wrong chunk. */
+    private int cursorRadius = 0;
 
     public static TerrainCapture getInstance() { return INSTANCE; }
 
@@ -48,6 +56,37 @@ public final class TerrainCapture {
 
     /** Seconds between upload attempts, for describing the wait to the player. */
     public static int uploadIntervalSeconds() { return UPLOAD_INTERVAL / 20; }
+
+    /**
+     * The radius a sweep will actually use, in chunks.
+     *
+     * `configured` is the player's setting, where 0 means follow the render
+     * distance. `viewDistance` is the client's clamped view distance — what
+     * the server is really sending, which is the only terrain we are allowed
+     * to read and therefore the only terrain worth walking.
+     *
+     * Clamped at both ends so a hand-edited config cannot ask for a window of
+     * nothing or one that is mostly unloadable coordinates.
+     */
+    public static int effectiveRadius(int configured, int viewDistance) {
+        int radius = configured > 0 ? configured : viewDistance;
+        return Math.max(MIN_RADIUS, Math.min(radius, MAX_RADIUS));
+    }
+
+    /** How long one full pass over a window of this radius takes, in seconds.
+     *  Sweeps are a fixed size, so a wider window is slower rather than
+     *  heavier — that is the trade being made, and the player should see it. */
+    public static int fullPassSeconds(int radius) {
+        int span = radius * 2 + 1;
+        int sweeps = (span * span + CHUNKS_PER_SWEEP - 1) / CHUNKS_PER_SWEEP;
+        return sweeps * SAMPLE_INTERVAL / 20;
+    }
+
+    /** The radius in force right now, for the status readout. */
+    public int currentRadius(MinecraftClient client) {
+        return effectiveRadius(YeedarConfig.getInstance().getMappingRadius(),
+                client.options.getClampedViewDistance());
+    }
 
     public void tick(MinecraftClient client) {
         if (client.world == null || client.player == null) {
@@ -78,31 +117,40 @@ public final class TerrainCapture {
     }
 
     /**
-     * Sample up to CHUNKS_PER_SWEEP chunks, walking the SAMPLE_RADIUS window
-     * as a flat sequence from where the last sweep left off.
+     * Sample up to CHUNKS_PER_SWEEP chunks, walking the current radius'
+     * window as a flat sequence from where the last sweep left off.
      *
      * The cap counts chunks actually passed to SurfaceSampler.sample(), not
      * chunks that turned out to have changed — an unchanged chunk still costs
      * a full 256-column read, and in the steady state (a player standing in
      * or moving through already-mapped territory) almost every chunk is
      * unchanged. Capping on offer()'s result would let the loop silently do
-     * up to 169 full samples a sweep instead of 8. Resuming from a cursor
-     * rather than always starting at the window's corner means the whole
-     * window is covered over roughly 21 sweeps (~42 seconds), which is fine
-     * because terrain is not time-critical — that latency is the thing being
-     * traded for a flat cost on the tick.
+     * up to a whole window of full samples a sweep instead of 8. Resuming
+     * from a cursor rather than always starting at the window's corner means
+     * the whole window is covered eventually — see fullPassSeconds — which is
+     * fine because terrain is not time-critical. That latency is the thing
+     * being traded for a flat cost on the tick, and it is why a wider radius
+     * is slower rather than more expensive per tick.
      */
     private void sweep(MinecraftClient client) {
         ChunkPos centre = client.player.getChunkPos();
-        int span = SAMPLE_RADIUS * 2 + 1;
+        // Read every sweep: the player can change render distance, and the
+        // server can change what it sends, at any time.
+        int radius = effectiveRadius(YeedarConfig.getInstance().getMappingRadius(),
+                client.options.getClampedViewDistance());
+        if (radius != cursorRadius) {
+            sweepCursor = 0;
+            cursorRadius = radius;
+        }
+        int span = radius * 2 + 1;
         int total = span * span;
         int sampled = 0;
         int step = 0;
 
         for (; step < total && sampled < CHUNKS_PER_SWEEP; step++) {
             int i = (sweepCursor + step) % total;
-            int dx = (i % span) - SAMPLE_RADIUS;
-            int dz = (i / span) - SAMPLE_RADIUS;
+            int dx = (i % span) - radius;
+            int dz = (i / span) - radius;
 
             // Only chunks the vanilla client already has. Never ask for one
             // to be loaded — that would be reading terrain the player is not
