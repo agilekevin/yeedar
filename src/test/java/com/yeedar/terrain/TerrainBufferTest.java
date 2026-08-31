@@ -9,9 +9,13 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class TerrainBufferTest {
 
+    // The buffer only cares whether content differs, so the block id varies
+    // with the colour to keep the two consistent — a chunk claiming one block
+    // with two colours is rejected at set().
     private ChunkPlanes chunk(int cx, int cz, int colour) {
         ChunkPlanes planes = new ChunkPlanes(cx, cz);
-        for (int i = 0; i < ChunkPlanes.COLUMNS; i++) planes.set(i, colour, 64, 64);
+        String block = "minecraft:test_block_" + colour;
+        for (int i = 0; i < ChunkPlanes.COLUMNS; i++) planes.set(i, block, colour, 64, 64);
         return planes;
     }
 

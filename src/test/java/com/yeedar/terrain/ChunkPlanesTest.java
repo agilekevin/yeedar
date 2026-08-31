@@ -4,6 +4,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.Base64;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -11,7 +12,7 @@ class ChunkPlanesTest {
 
     private ChunkPlanes flat() {
         ChunkPlanes planes = new ChunkPlanes(3, -4);
-        for (int i = 0; i < ChunkPlanes.COLUMNS; i++) planes.set(i, 1, 64, 64);
+        for (int i = 0; i < ChunkPlanes.COLUMNS; i++) planes.set(i, "minecraft:stone", 1, 64, 64);
         return planes;
     }
 
@@ -27,18 +28,22 @@ class ChunkPlanesTest {
     }
 
     @Test
-    @DisplayName("colours encode to exactly 256 bytes")
+    @DisplayName("columns encode to exactly 256 bytes, one palette index each")
     void coloursLength() {
-        byte[] raw = Base64.getDecoder().decode(flat().encodeColors());
+        ChunkPlanes planes = flat();
+        byte[] raw = Base64.getDecoder().decode(planes.encodeColors());
         assertEquals(256, raw.length);
-        assertEquals(1, raw[0]);
+        // A palette index, not a MapColor: the single block in this fixture is
+        // the palette's first and only entry.
+        assertEquals(0, raw[0]);
+        assertEquals(List.of(List.of("minecraft:stone", 1)), planes.encodePalette());
     }
 
     @Test
     @DisplayName("heights encode to 512 bytes, big-endian signed")
     void heightsAreBigEndianInt16() {
         ChunkPlanes planes = new ChunkPlanes(0, 0);
-        for (int i = 0; i < ChunkPlanes.COLUMNS; i++) planes.set(i, 1, -64, 300);
+        for (int i = 0; i < ChunkPlanes.COLUMNS; i++) planes.set(i, "minecraft:stone", 1, -64, 300);
 
         byte[] floors = Base64.getDecoder().decode(planes.encodeFloors());
         assertEquals(512, floors.length);
@@ -59,22 +64,22 @@ class ChunkPlanesTest {
         // The server rejects anything over 61 and drops the whole batch with it,
         // so catching it here saves every other chunk in the request.
         assertThrows(IllegalArgumentException.class,
-                () -> planes.set(0, ChunkPlanes.MAX_MAP_COLOR + 1, 64, 64));
+                () -> planes.set(0, "minecraft:stone", ChunkPlanes.MAX_MAP_COLOR + 1, 64, 64));
     }
 
     @Test
     @DisplayName("a height outside the world is rejected")
     void rejectsImpossibleHeight() {
         ChunkPlanes planes = new ChunkPlanes(0, 0);
-        assertThrows(IllegalArgumentException.class, () -> planes.set(0, 1, -65, 64));
-        assertThrows(IllegalArgumentException.class, () -> planes.set(0, 1, 64, 321));
+        assertThrows(IllegalArgumentException.class, () -> planes.set(0, "minecraft:stone", 1, -65, 64));
+        assertThrows(IllegalArgumentException.class, () -> planes.set(0, "minecraft:stone", 1, 64, 321));
     }
 
     @Test
     @DisplayName("water below the seabed is rejected as physically impossible")
     void rejectsTopBelowFloor() {
         ChunkPlanes planes = new ChunkPlanes(0, 0);
-        assertThrows(IllegalArgumentException.class, () -> planes.set(0, 1, 80, 70));
+        assertThrows(IllegalArgumentException.class, () -> planes.set(0, "minecraft:stone", 1, 80, 70));
     }
 
     @Test
@@ -93,7 +98,7 @@ class ChunkPlanesTest {
         assertEquals(flat().contentHash(), flat().contentHash());
 
         ChunkPlanes other = flat();
-        other.set(0, 2, 64, 64);
+        other.set(0, "minecraft:sand", 2, 64, 64);
         assertNotEquals(flat().contentHash(), other.contentHash());
     }
 
@@ -103,8 +108,8 @@ class ChunkPlanesTest {
         ChunkPlanes here = new ChunkPlanes(1, 1);
         ChunkPlanes there = new ChunkPlanes(9, 9);
         for (int i = 0; i < ChunkPlanes.COLUMNS; i++) {
-            here.set(i, 1, 64, 64);
-            there.set(i, 1, 64, 64);
+            here.set(i, "minecraft:stone", 1, 64, 64);
+            there.set(i, "minecraft:stone", 1, 64, 64);
         }
         assertEquals(here.contentHash(), there.contentHash());
     }
@@ -115,7 +120,7 @@ class ChunkPlanesTest {
         // Every column must be sampled. A half-filled chunk would upload zeroed
         // columns as if they were observed terrain at y=0.
         ChunkPlanes planes = new ChunkPlanes(0, 0);
-        planes.set(0, 1, 64, 64);
+        planes.set(0, "minecraft:stone", 1, 64, 64);
         assertThrows(IllegalStateException.class, planes::encodeColors);
     }
 
@@ -126,7 +131,7 @@ class ChunkPlanesTest {
         // column 256 times would look like a full chunk and upload 255 zeroed
         // columns as terrain at y=0.
         ChunkPlanes planes = new ChunkPlanes(0, 0);
-        for (int i = 0; i < ChunkPlanes.COLUMNS; i++) planes.set(0, 1, 64, 64);
+        for (int i = 0; i < ChunkPlanes.COLUMNS; i++) planes.set(0, "minecraft:stone", 1, 64, 64);
         assertThrows(IllegalStateException.class, planes::encodeColors);
     }
 
@@ -137,9 +142,9 @@ class ChunkPlanesTest {
         // X" message; an unchecked index would instead throw a raw
         // ArrayIndexOutOfBoundsException with no such context.
         ChunkPlanes planes = new ChunkPlanes(0, 0);
-        assertThrows(IllegalArgumentException.class, () -> planes.set(-1, 1, 64, 64));
+        assertThrows(IllegalArgumentException.class, () -> planes.set(-1, "minecraft:stone", 1, 64, 64));
         assertThrows(IllegalArgumentException.class,
-                () -> planes.set(ChunkPlanes.COLUMNS, 1, 64, 64));
+                () -> planes.set(ChunkPlanes.COLUMNS, "minecraft:stone", 1, 64, 64));
     }
 
     @Test
@@ -149,7 +154,7 @@ class ChunkPlanesTest {
         // three planes describe different states.
         ChunkPlanes planes = flat();
         planes.encodeColors();
-        assertThrows(IllegalStateException.class, () -> planes.set(0, 2, 64, 64));
+        assertThrows(IllegalStateException.class, () -> planes.set(0, "minecraft:stone", 2, 64, 64));
     }
 
     @Test
@@ -172,9 +177,10 @@ class ChunkPlanesTest {
         // transposition to x*16+z would show up. A fixture with identical
         // columns cannot catch that, which is the whole risk this class names.
         ChunkPlanes planes = new ChunkPlanes(0, 0);
+        String[] blocks = {"minecraft:grass_block", "minecraft:sand", "minecraft:stone"};
         for (int z = 0; z < ChunkPlanes.SIDE; z++) {
             for (int x = 0; x < ChunkPlanes.SIDE; x++) {
-                planes.set(ChunkPlanes.index(x, z), 1 + (x % 3), 64 + z, 64 + z);
+                planes.set(ChunkPlanes.index(x, z), blocks[x % 3], 1 + (x % 3), 64 + z, 64 + z);
             }
         }
         byte[] colors = Base64.getDecoder().decode(planes.encodeColors());
@@ -182,10 +188,90 @@ class ChunkPlanesTest {
         for (int z = 0; z < ChunkPlanes.SIDE; z++) {
             for (int x = 0; x < ChunkPlanes.SIDE; x++) {
                 int i = z * ChunkPlanes.SIDE + x;
-                assertEquals(1 + (x % 3), colors[i], "colour at x=" + x + " z=" + z);
+                // The plane holds a palette index now, assigned in first-seen
+                // order — which for this fixture is exactly x % 3.
+                assertEquals(x % 3, colors[i], "palette index at x=" + x + " z=" + z);
                 int height = ((floors[i * 2] & 0xFF) << 8) | (floors[i * 2 + 1] & 0xFF);
                 assertEquals(64 + z, height, "floor at x=" + x + " z=" + z);
             }
         }
+    }
+
+    // ── Palette ──────────────────────────────────────────────────────────
+    //
+    // Columns reference a palette rather than carrying a MapColor, so that a
+    // colour can be changed later by re-rendering instead of re-capturing.
+
+    @Test
+    @DisplayName("repeated blocks collapse to one palette entry")
+    void paletteDeduplicates() {
+        ChunkPlanes planes = new ChunkPlanes(0, 0);
+        for (int i = 0; i < ChunkPlanes.COLUMNS; i++) {
+            planes.set(i, "minecraft:stone", 11, 64, 64);
+        }
+        assertEquals(1, planes.paletteSize());
+        assertEquals(List.of(List.of("minecraft:stone", 11)), planes.encodePalette());
+    }
+
+    @Test
+    @DisplayName("palette order matches the indices the columns hold")
+    void paletteOrderMatchesIndices() {
+        ChunkPlanes planes = new ChunkPlanes(0, 0);
+        for (int i = 0; i < ChunkPlanes.COLUMNS; i++) {
+            boolean odd = i % 2 == 1;
+            planes.set(i, odd ? "minecraft:water" : "minecraft:stone", odd ? 12 : 11, 64, 64);
+        }
+        byte[] cols = Base64.getDecoder().decode(planes.encodeColors());
+        assertEquals(List.of(List.of("minecraft:stone", 11), List.of("minecraft:water", 12)),
+                planes.encodePalette());
+        assertEquals(0, cols[0]);
+        assertEquals(1, cols[1]);
+    }
+
+    @Test
+    @DisplayName("two blocks sharing a MapColor stay distinguishable")
+    void sharedColourStaysDistinct() {
+        // The whole point: mycelium and purple wool are both MapColor 24, and a
+        // colour-only capture could never tell them apart however it was tuned.
+        ChunkPlanes planes = new ChunkPlanes(0, 0);
+        for (int i = 0; i < ChunkPlanes.COLUMNS; i++) {
+            planes.set(i, i < 128 ? "minecraft:mycelium" : "minecraft:purple_wool", 24, 64, 64);
+        }
+        assertEquals(2, planes.paletteSize());
+        byte[] cols = Base64.getDecoder().decode(planes.encodeColors());
+        assertNotEquals(cols[0], cols[200]);
+    }
+
+    @Test
+    @DisplayName("the same block reporting two colours is rejected, not silently kept once")
+    void inconsistentColourForOneBlock() {
+        ChunkPlanes planes = new ChunkPlanes(0, 0);
+        planes.set(0, "minecraft:stone", 11, 64, 64);
+        assertThrows(IllegalArgumentException.class,
+                () -> planes.set(1, "minecraft:stone", 12, 64, 64));
+    }
+
+    @Test
+    @DisplayName("a missing or overlong block id is rejected")
+    void blockIdIsValidated() {
+        ChunkPlanes planes = new ChunkPlanes(0, 0);
+        assertThrows(IllegalArgumentException.class, () -> planes.set(0, null, 11, 64, 64));
+        assertThrows(IllegalArgumentException.class, () -> planes.set(0, "", 11, 64, 64));
+        assertThrows(IllegalArgumentException.class,
+                () -> planes.set(0, "x".repeat(ChunkPlanes.MAX_BLOCK_ID_LENGTH + 1), 11, 64, 64));
+    }
+
+    @Test
+    @DisplayName("the palette is part of the content hash")
+    void paletteChangesTheHash() {
+        // Same indices, different blocks. Without the palette in the hash the
+        // second chunk would look unchanged and never upload.
+        ChunkPlanes a = new ChunkPlanes(0, 0);
+        ChunkPlanes b = new ChunkPlanes(0, 0);
+        for (int i = 0; i < ChunkPlanes.COLUMNS; i++) {
+            a.set(i, "minecraft:mycelium", 24, 64, 64);
+            b.set(i, "minecraft:purple_wool", 24, 64, 64);
+        }
+        assertNotEquals(a.contentHash(), b.contentHash());
     }
 }

@@ -151,6 +151,36 @@ public final class TerrainCapture {
         return Math.max(1, sweeps * SAMPLE_INTERVAL / 20);
     }
 
+    /**
+     * Why a requested radius cannot be fully mapped, or null if it can.
+     *
+     * `clientView` is the player's own render-distance setting; `serverView` is
+     * what the server actually sends, which is what bounds us. Reporting only
+     * the effective number called it "your render distance", which reads as a
+     * bug when the server's limit is lower than the setting — the player sees a
+     * number they never chose and reasonably concludes we defaulted.
+     */
+    public static String reachNote(int requested, int clientView, int serverView) {
+        int effective = serverView > 0 ? Math.min(clientView, serverView) : clientView;
+        if (requested <= effective) return null;
+        if (serverView > 0 && serverView < clientView) {
+            return "The server only sends you " + serverView + " chunks (your render "
+                    + "distance is set to " + clientView + "), so chunks past "
+                    + serverView + " never load and cannot be mapped.";
+        }
+        return "Beyond your render distance of " + clientView
+                + ", so those chunks never load and cannot be mapped.";
+    }
+
+    /** What the server is actually sending, or 0 when it has not said. */
+    public static int serverViewDistance(MinecraftClient client) {
+        int clamped = client.options.getClampedViewDistance();
+        int mine = client.options.getViewDistance().getValue();
+        // getClampedViewDistance is min(mine, server) when the server declared
+        // one, so a clamp below the setting is the server's number.
+        return clamped < mine ? clamped : 0;
+    }
+
     /** The radius in force right now, for the status readout. */
     public int currentRadius(MinecraftClient client) {
         return effectiveRadius(YeedarConfig.getInstance().getMappingRadius(),

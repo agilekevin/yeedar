@@ -209,6 +209,10 @@ public class YeetVisClient {
             Map<String, Object> row = new LinkedHashMap<>();
             row.put("cx", planes.cx());
             row.put("cz", planes.cz());
+            // `colors` holds palette indices whenever `palette` is present.
+            // Older rows on the server have no palette and hold MapColor ids
+            // directly; the server tells them apart by that field's presence.
+            row.put("palette", planes.encodePalette());
             row.put("colors", planes.encodeColors());
             row.put("floors", planes.encodeFloors());
             row.put("tops", planes.encodeTops());
