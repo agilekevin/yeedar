@@ -17,8 +17,24 @@ import net.minecraft.world.chunk.WorldChunk;
  * Eden permits reading "the top layer only of solid blocks (including y
  * position), and above transparent blocks in the world for mapping purposes".
  *
- * The top layer comes from the MOTION_BLOCKING heightmap, which the server
- * sends to clients. OCEAN_FLOOR would give the seabed directly but is
+ * The top layer comes from the WORLD_SURFACE heightmap, which the server sends
+ * to clients (Purpose.CLIENT, same as MOTION_BLOCKING).
+ *
+ * WORLD_SURFACE counts any non-air block; MOTION_BLOCKING counts only blocks
+ * that block movement. That difference lost real, visible terrain: pixel art
+ * and decoration built from carpet, snow layers, flowers, rails, pressure
+ * plates and buttons was skipped entirely, and the map reported whatever solid
+ * block sat underneath. A nation vault's mushroom mural came through with the
+ * slab parts present and everything else replaced by the obsidian canvas one
+ * block below it.
+ *
+ * For a map of what is visible from above, "topmost non-air block" is simply
+ * the right question, and "topmost block that blocks movement" was the wrong
+ * one. It also reads no deeper than MOTION_BLOCKING ever did — WORLD_SURFACE
+ * stops at or above it in every column — so this widens what the map shows
+ * without reading further into the world.
+ *
+ * OCEAN_FLOOR would give the seabed directly but is
  * LIVE_WORLD purpose and is never transmitted — a client cannot read it.
  *
  * So the seabed is found by stepping down while the block is water, stopping at
@@ -84,7 +100,7 @@ public final class SurfaceSampler {
             return null;   // outside the mapped world; nothing to say about it
         }
 
-        Heightmap surface = chunk.getHeightmap(Heightmap.Type.MOTION_BLOCKING);
+        Heightmap surface = chunk.getHeightmap(Heightmap.Type.WORLD_SURFACE);
         if (surface == null) return null;
 
         ChunkPlanes planes = new ChunkPlanes(pos.x, pos.z);
