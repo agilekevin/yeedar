@@ -3,6 +3,7 @@ package com.yeedar.command;
 import com.mojang.brigadier.arguments.DoubleArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.yeedar.api.OAuthCallbackServer;
+import com.yeedar.api.YeetVisClient;
 import com.yeedar.config.YeedarConfig;
 import com.yeedar.terrain.TerrainCapture;
 import com.yeedar.tracker.JalistScanner;
@@ -83,11 +84,28 @@ public class YeedarCommands {
 
     private static Text mappingStatus() {
         boolean on = YeedarConfig.getInstance().isMappingEnabled();
-        return Text.literal("\u00a76--- Terrain mapping ---\n"
+        TerrainCapture capture = TerrainCapture.getInstance();
+        StringBuilder sb = new StringBuilder("\u00a76--- Terrain mapping ---\n"
                 + "\u00a77State: " + (on ? "\u00a7aON" : "\u00a7cOFF") + "\n"
-                + "\u00a77Queued chunks: \u00a7f" + TerrainCapture.getInstance().pending() + "\n"
-                + "\u00a77Uploading the chunks you load keeps the map current, and\n"
+                + "\u00a77Queued chunks: \u00a7f" + capture.pending() + "\n");
+        // A queue that is not draining is the one thing worth surfacing here.
+        // It used to be visible only on stderr, which no player reads, so a
+        // revoked token looked exactly like a working feature with nothing
+        // to send.
+        int skips = capture.uploadSkipsRemaining();
+        if (skips > 0) {
+            sb.append("\u00a77Uploads: \u00a7cretrying in ~")
+              .append(skips * TerrainCapture.uploadIntervalSeconds())
+              .append("s \u00a77(the last one did not land \u2014 see the log)\n");
+        }
+        YeetVisClient.Unconfigured why = YeetVisClient.unconfiguredReason();
+        if (why != null) {
+            sb.append("\u00a7c").append(why.problem()).append(" \u00a77")
+              .append(why.fix()).append("\n");
+        }
+        sb.append("\u00a77Uploading the chunks you load keeps the map current, and\n"
                 + "\u00a77records where you have been. It is off unless you turn it on.");
+        return Text.literal(sb.toString());
     }
 
     public static void register() {
@@ -206,6 +224,20 @@ public class YeedarCommands {
                             })
                             .then(ClientCommandManager.literal("on")
                                     .executes(ctx -> {
+                                        // Turning on an uploader with nowhere
+                                        // to upload to reports success and sends
+                                        // nothing — the same trap the jalist path
+                                        // already fixed. The queue grows, the
+                                        // player is told it is on, and the only
+                                        // sign of trouble is a line on stderr.
+                                        YeetVisClient.Unconfigured why =
+                                                YeetVisClient.unconfiguredReason();
+                                        if (why != null) {
+                                            ctx.getSource().sendError(Text.literal(
+                                                    "\u00a7cTerrain mapping not turned on. \u00a77"
+                                                    + why.problem() + " " + why.fix()));
+                                            return 0;
+                                        }
                                         YeedarConfig config = YeedarConfig.getInstance();
                                         config.setMappingEnabled(true);
                                         config.save();
