@@ -15,6 +15,11 @@ import java.util.Base64;
  * Column order is row-major with z outermost: i = z * 16 + x. The server, the
  * tile renderer and this class must agree on that; disagreeing would render
  * every tile transposed with nothing failing anywhere.
+ *
+ * The world-shape constants below (MAX_MAP_COLOR, MIN_Y/MAX_Y, MIN_CHUNK/MAX_CHUNK)
+ * are hand-duplicated against api/terrain.py in the yeetvis repo. Nothing enforces
+ * agreement between the two; a future Minecraft version bump that touches one side
+ * without the other would corrupt every tile silently.
  */
 public final class ChunkPlanes {
 
@@ -22,6 +27,8 @@ public final class ChunkPlanes {
     public static final int COLUMNS = SIDE * SIDE;
     /** MapColor has 62 entries in 1.21.8; ids run 0..61. */
     public static final int MAX_MAP_COLOR = 61;
+    // 1.21 overworld build range. Heightmaps report the y *above* the surface, so
+    // the ceiling is one past the top buildable block (matches api/terrain.py).
     public static final int MIN_Y = -64;
     public static final int MAX_Y = 320;
     /** The mapped world is 20480 blocks square, so chunks run -640..639. */
@@ -37,6 +44,10 @@ public final class ChunkPlanes {
      *  written twice, letting requireComplete() pass over a genuine gap. */
     private final boolean[] written = new boolean[COLUMNS];
     private int filled = 0;
+    /** Set once any encode succeeds. Blocks further set() so the three planes
+     *  can never drift apart after publication, but never blocks re-encoding —
+     *  the uploader must be able to re-encode the same object on a retry. */
+    private boolean encoded = false;
 
     public ChunkPlanes(int cx, int cz) {
         if (cx < MIN_CHUNK || cx > MAX_CHUNK || cz < MIN_CHUNK || cz > MAX_CHUNK) {
@@ -53,6 +64,15 @@ public final class ChunkPlanes {
     }
 
     public void set(int index, int mapColor, int floor, int top) {
+        if (index < 0 || index >= COLUMNS) {
+            throw new IllegalArgumentException(
+                    "column index " + index + " outside 0.." + (COLUMNS - 1));
+        }
+        if (encoded) {
+            throw new IllegalStateException(
+                    "chunk (" + cx + ", " + cz + ") was already encoded; mutating it now "
+                    + "would make its three planes describe different states");
+        }
         if (mapColor < 0 || mapColor > MAX_MAP_COLOR) {
             throw new IllegalArgumentException("column " + index + ": map colour " + mapColor);
         }
@@ -79,6 +99,9 @@ public final class ChunkPlanes {
                     "chunk (" + cx + ", " + cz + ") has " + filled + " of " + COLUMNS
                     + " columns; an unfilled column would upload as terrain at y=0");
         }
+        // Freezes set(), not encode: the uploader must be able to re-encode the
+        // same object any number of times when a batch is retried.
+        encoded = true;
     }
 
     public String encodeColors() {

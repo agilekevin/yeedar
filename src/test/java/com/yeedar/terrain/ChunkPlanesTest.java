@@ -129,4 +129,63 @@ class ChunkPlanesTest {
         for (int i = 0; i < ChunkPlanes.COLUMNS; i++) planes.set(0, 1, 64, 64);
         assertThrows(IllegalStateException.class, planes::encodeColors);
     }
+
+    @Test
+    @DisplayName("an out-of-range column index is rejected, not thrown raw")
+    void rejectsOutOfRangeIndex() {
+        // Every other bad input throws IllegalArgumentException with a "column
+        // X" message; an unchecked index would instead throw a raw
+        // ArrayIndexOutOfBoundsException with no such context.
+        ChunkPlanes planes = new ChunkPlanes(0, 0);
+        assertThrows(IllegalArgumentException.class, () -> planes.set(-1, 1, 64, 64));
+        assertThrows(IllegalArgumentException.class,
+                () -> planes.set(ChunkPlanes.COLUMNS, 1, 64, 64));
+    }
+
+    @Test
+    @DisplayName("set() after an encode is rejected")
+    void rejectsMutationAfterEncode() {
+        // Once one plane has been encoded, mutating any column would let the
+        // three planes describe different states.
+        ChunkPlanes planes = flat();
+        planes.encodeColors();
+        assertThrows(IllegalStateException.class, () -> planes.set(0, 2, 64, 64));
+    }
+
+    @Test
+    @DisplayName("encoding repeatedly returns identical strings")
+    void encodingRepeatedlyIsIdempotent() {
+        // The uploader re-encodes the same object when a batch is retried, so
+        // encode must stay callable any number of times even though set() is
+        // frozen after the first call.
+        ChunkPlanes planes = flat();
+        String first = planes.encodeColors();
+        String second = planes.encodeColors();
+        assertEquals(first, second);
+        assertEquals(planes.encodeFloors(), planes.encodeFloors());
+    }
+
+    @Test
+    @DisplayName("encoded bytes land at the index the layout promises")
+    void encodingPreservesColumnLayout() {
+        // Deliberately asymmetric: colour varies with x, height with z, so a
+        // transposition to x*16+z would show up. A fixture with identical
+        // columns cannot catch that, which is the whole risk this class names.
+        ChunkPlanes planes = new ChunkPlanes(0, 0);
+        for (int z = 0; z < ChunkPlanes.SIDE; z++) {
+            for (int x = 0; x < ChunkPlanes.SIDE; x++) {
+                planes.set(ChunkPlanes.index(x, z), 1 + (x % 3), 64 + z, 64 + z);
+            }
+        }
+        byte[] colors = Base64.getDecoder().decode(planes.encodeColors());
+        byte[] floors = Base64.getDecoder().decode(planes.encodeFloors());
+        for (int z = 0; z < ChunkPlanes.SIDE; z++) {
+            for (int x = 0; x < ChunkPlanes.SIDE; x++) {
+                int i = z * ChunkPlanes.SIDE + x;
+                assertEquals(1 + (x % 3), colors[i], "colour at x=" + x + " z=" + z);
+                int height = ((floors[i * 2] & 0xFF) << 8) | (floors[i * 2 + 1] & 0xFF);
+                assertEquals(64 + z, height, "floor at x=" + x + " z=" + z);
+            }
+        }
+    }
 }
