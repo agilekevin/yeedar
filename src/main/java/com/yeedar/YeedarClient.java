@@ -2,6 +2,7 @@ package com.yeedar;
 
 import com.yeedar.command.YeedarCommands;
 import com.yeedar.config.YeedarConfig;
+import com.yeedar.terrain.TerrainCapture;
 import com.yeedar.tracker.FriendlyTracker;
 import com.yeedar.tracker.JalistScanner;
 import com.yeedar.tracker.NamelayerListener;
@@ -26,6 +27,8 @@ public class YeedarClient implements ClientModInitializer {
             PlayerTracker.getInstance().tick(client);
             // No-op unless a /jalist scan is running.
             JalistScanner.getInstance().tick(client);
+            // No-op unless /yeedar mapping is on.
+            TerrainCapture.getInstance().tick(client);
 
             // Periodically refresh friendly list
             friendlyRefreshCounter++;

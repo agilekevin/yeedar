@@ -7,6 +7,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import com.yeedar.terrain.ChunkPlanes;
 import com.yeedar.tracker.JalistEntry;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.text.Text;
@@ -185,6 +186,65 @@ public class YeetVisClient {
                 .build();
 
         send(request, rows.size(), 0);
+    }
+
+    /**
+     * Upload one batch of sampled chunks.
+     *
+     * <p>Unlike {@link #uploadJalist}, this reports its outcome: a snitch scan
+     * reports separately from the upload, but terrain has nothing else
+     * watching, so a failed batch would be silently lost if this fired and
+     * forgot like that one does.
+     */
+    public static CompletableFuture<Boolean> uploadTerrain(List<ChunkPlanes> batch) {
+        YeedarConfig config = YeedarConfig.getInstance();
+        Unconfigured why = unconfiguredReason();
+        if (why != null) {
+            System.err.println("[Yeedar] skipping terrain upload — " + why.problem());
+            return CompletableFuture.completedFuture(false);
+        }
+
+        List<Map<String, Object>> rows = new ArrayList<>(batch.size());
+        for (ChunkPlanes planes : batch) {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("cx", planes.cx());
+            row.put("cz", planes.cz());
+            row.put("colors", planes.encodeColors());
+            row.put("floors", planes.encodeFloors());
+            row.put("tops", planes.encodeTops());
+            rows.add(row);
+        }
+
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("world", "overworld");
+        payload.put("chunks", rows);
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(config.getApiBaseUrl() + "/terrain"))
+                .header("Content-Type", "application/json")
+                .header("X-Yeedar-Token", config.getToken())
+                .POST(HttpRequest.BodyPublishers.ofString(GSON.toJson(payload)))
+                .build();
+
+        return HTTP_CLIENT.sendAsync(request, HttpResponse.BodyHandlers.ofString())
+                .thenApply(response -> {
+                    int status = response.statusCode();
+                    if (status == 200) return true;
+                    // 429 is the server's hourly cap and is expected under heavy
+                    // exploration; say so plainly rather than as an error.
+                    if (status == 429) {
+                        System.out.println("[Yeedar] terrain rate cap reached; "
+                                + "pausing until the next hour");
+                    } else {
+                        System.err.println("[Yeedar] terrain upload failed: " + status
+                                + " " + response.body());
+                    }
+                    return false;
+                })
+                .exceptionally(error -> {
+                    System.err.println("[Yeedar] terrain upload error: " + error.getMessage());
+                    return false;
+                });
     }
 
     /**
