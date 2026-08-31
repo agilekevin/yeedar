@@ -82,7 +82,7 @@ That's it — once logged in, tracking runs automatically while you play.
 | `/yeedar mapping off` | Stop. |
 | `/yeedar mapping range` | Show the sampling radius and how long a full pass takes. |
 | `/yeedar mapping range <chunks>` | Sample this many chunks out (1–32). |
-| `/yeedar mapping range auto` | Follow your render distance. The default. |
+| `/yeedar mapping range auto` | Follow your render distance, up to the widest radius that stays complete at horse speed. The default. |
 | `/yeedar status` | Show tracking state, login, API URL, range, and tracked count. |
 | `/yeedar list` | List players currently in range and their positions. |
 | `/yeedar ignore` | Show the names Yeedar never reports. |

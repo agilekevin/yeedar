@@ -19,12 +19,24 @@ public final class TerrainCapture {
 
     private static final TerrainCapture INSTANCE = new TerrainCapture();
 
-    /** Ticks between sweeps. 20 ticks is a second. */
-    private static final int SAMPLE_INTERVAL = 40;
+    /** Ticks between sweeps. 20 ticks is a second.
+     *
+     *  Every tick, rather than in a burst every two seconds. The burst was the
+     *  worse shape twice over: it put 2048 column reads into one tick — double
+     *  what vanilla's own map item sustains — and then idled for 39, which is
+     *  both the stutter risk and a throughput ceiling. Spread out, the same
+     *  work costs a quarter of that per tick and can be raised well past what
+     *  the burst could afford. */
+    private static final int SAMPLE_INTERVAL = 1;
     /** Ticks between upload attempts. */
     private static final int UPLOAD_INTERVAL = 200;
-    /** Chunks sampled per sweep, so one tick never samples a whole view. */
-    private static final int CHUNKS_PER_SWEEP = 8;
+    /** Chunks sampled per sweep, so one tick never samples a whole view.
+     *
+     *  Two per tick is 40 chunks/s, which keeps a window out to radius 21
+     *  fully sampled at horse speed (see keepsUpWith). It costs 512 column
+     *  reads per tick — half of what vanilla's map item does every tick for a
+     *  player holding a map, and a quarter of the old burst's peak. */
+    private static final int CHUNKS_PER_SWEEP = 2;
     /** Smallest useful window: the 3x3 the player is standing in. */
     public static final int MIN_RADIUS = 1;
     /** Vanilla's maximum render distance, and so the most chunks a client can
@@ -69,9 +81,66 @@ public final class TerrainCapture {
      * nothing or one that is mostly unloadable coordinates.
      */
     public static int effectiveRadius(int configured, int viewDistance) {
-        int radius = configured > 0 ? configured : viewDistance;
+        if (configured > 0) {
+            // An explicit setting is allowed to go patchy. Someone who wants
+            // coverage over fidelity, or who never travels fast, should be
+            // able to ask for it — they are told what it costs when they do.
+            return Math.max(MIN_RADIUS, Math.min(configured, MAX_RADIUS));
+        }
+        int radius = Math.min(viewDistance, smoothMaxRadius());
         return Math.max(MIN_RADIUS, Math.min(radius, MAX_RADIUS));
     }
+
+    /**
+     * The widest window the sample rate can keep fully covered at horse speed.
+     *
+     * This is the ceiling on the automatic radius. Following the render
+     * distance is the right default only up to the point where the sweep can
+     * still get round the window before the player leaves it; past that, a
+     * wider setting does not map more, it maps the same amount with holes in
+     * it, because the cursor is spread too thin to return to any given chunk
+     * in time. Better to map a smaller area completely.
+     *
+     * Derived rather than written down, so that tuning the rate moves the
+     * ceiling with it instead of leaving a stale constant behind.
+     */
+    public static int smoothMaxRadius() {
+        double chunksPerSecond = CHUNKS_PER_SWEEP * 20.0 / SAMPLE_INTERVAL;
+        int radius = (int) Math.floor((16.0 * chunksPerSecond / FAST_HORSE_BPS - 1) / 2);
+        return Math.max(MIN_RADIUS, Math.min(radius, MAX_RADIUS));
+    }
+
+    /**
+     * The fastest a player can travel, in blocks per second, and still have
+     * every chunk sampled before it falls out the back of the window.
+     *
+     * A chunk stays in the window while the player crosses it, so its time
+     * there is span*16/v seconds. The cursor walks uniformly at
+     * CHUNKS_PER_SWEEP per SAMPLE_INTERVAL over span^2 positions, so it
+     * revisits any one of them every span^2/rate seconds. Setting those equal
+     * and solving for v gives 16*rate/span.
+     *
+     * Note the direction: this falls as the radius grows. A wider window
+     * spreads the same budget over more chunks, so it tracks a SLOWER player,
+     * not a faster one — widening the radius cannot fix outrunning the sweep,
+     * only raising the rate can.
+     *
+     * An approximation: the real cursor is a raster walk over a window that is
+     * itself moving, so coverage is better or worse than uniform depending on
+     * how the two line up. It is the right order of magnitude and the right
+     * shape, which is what picking the constants needs.
+     */
+    public static double keepsUpWith(int radius) {
+        int span = radius * 2 + 1;
+        double chunksPerSecond = CHUNKS_PER_SWEEP * 20.0 / SAMPLE_INTERVAL;
+        return 16.0 * chunksPerSecond / span;
+    }
+
+    /** Top speed of a maxed-out horse, in blocks per second. Minecraft rolls a
+     *  horse's movement speed as (0.45 + 3 * rand * 0.3) * 0.25, so 0.3375 is
+     *  the ceiling; that measures at about this. The fastest thing a player is
+     *  likely to be mapping from, and so what the sample rate is sized for. */
+    public static final double FAST_HORSE_BPS = 14.5;
 
     /** How long one full pass over a window of this radius takes, in seconds.
      *  Sweeps are a fixed size, so a wider window is slower rather than
@@ -79,7 +148,7 @@ public final class TerrainCapture {
     public static int fullPassSeconds(int radius) {
         int span = radius * 2 + 1;
         int sweeps = (span * span + CHUNKS_PER_SWEEP - 1) / CHUNKS_PER_SWEEP;
-        return sweeps * SAMPLE_INTERVAL / 20;
+        return Math.max(1, sweeps * SAMPLE_INTERVAL / 20);
     }
 
     /** The radius in force right now, for the status readout. */

@@ -96,6 +96,15 @@ public class YeedarCommands {
           .append(configured > 0 ? "" : " (following your render distance)")
           .append(", full pass ~").append(TerrainCapture.fullPassSeconds(radius))
           .append("s\n");
+        // The number that decides whether the map comes out patchy, so it goes
+        // next to the radius rather than being something to work out.
+        double keepsUp = TerrainCapture.keepsUpWith(radius);
+        boolean patchy = keepsUp < TerrainCapture.FAST_HORSE_BPS;
+        sb.append(patchy ? "\u00a7e" : "\u00a77").append("Complete up to ")
+          .append(String.format("%.0f", keepsUp)).append(" blocks/s")
+          .append(patchy ? " \u2014 below horse speed, so travelling fast will leave holes"
+                         : " (a fast horse does " + Math.round(TerrainCapture.FAST_HORSE_BPS) + ")")
+          .append("\n");
         // A queue that is not draining is the one thing worth surfacing here.
         // It used to be visible only on stderr, which no player reads, so a
         // revoked token looked exactly like a working feature with nothing
@@ -320,8 +329,20 @@ public class YeedarCommands {
                                                     msg.append(" \u00a7eBeyond your render distance of ")
                                                        .append(view)
                                                        .append("; those chunks are never loaded, so they")
-                                                       .append(" cannot be mapped. \u00a7f/yeedar mapping")
-                                                       .append(" range auto\u00a7e follows it instead.");
+                                                       .append(" cannot be mapped.");
+                                                }
+                                                if (chunks > TerrainCapture.smoothMaxRadius()) {
+                                                    msg.append(" \u00a7eWider than the sweep can cover at")
+                                                       .append(" speed \u2014 complete only up to ")
+                                                       .append(String.format("%.0f",
+                                                               TerrainCapture.keepsUpWith(chunks)))
+                                                       .append(" blocks/s, so travelling fast will leave")
+                                                       .append(" holes.");
+                                                }
+                                                if (chunks > view
+                                                        || chunks > TerrainCapture.smoothMaxRadius()) {
+                                                    msg.append(" \u00a7f/yeedar mapping range auto")
+                                                       .append("\u00a7e picks the widest safe radius.");
                                                 }
                                                 ctx.getSource().sendFeedback(Text.literal(msg.toString()));
                                                 return 1;
