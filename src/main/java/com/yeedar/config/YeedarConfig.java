@@ -35,6 +35,13 @@ public class YeedarConfig {
     // below are what the common Fabric freecam mods use; matching is
     // case-insensitive, so only genuinely different names need listing.
     private List<String> ignoredNames = new ArrayList<>(List.of("FreeCam", "FreeCamera"));
+    // Yeedar cannot update itself, so the most it can do is say a newer jar
+    // exists. Off switches the check off entirely, network call included.
+    private boolean updateCheckEnabled = true;
+    // The release tag this install has already announced. Kept so the notice
+    // appears once per version rather than on every world join — one that
+    // returns every session is one people train themselves not to read.
+    private String lastNotifiedVersion = "";
 
     public static YeedarConfig getInstance() {
         if (instance == null) {
@@ -142,5 +149,25 @@ public class YeedarConfig {
 
     public boolean isLoggedIn() {
         return token != null && !token.isEmpty();
+    }
+
+    public boolean isUpdateCheckEnabled() {
+        return updateCheckEnabled;
+    }
+
+    public void setUpdateCheckEnabled(boolean updateCheckEnabled) {
+        this.updateCheckEnabled = updateCheckEnabled;
+    }
+
+    /** Never null: a config written before this field existed has no key for
+     *  it, and Gson leaves the initializer alone only for absent keys — an
+     *  explicit {@code "lastNotifiedVersion": null} would still hand back null
+     *  and NPE the equals() in the notify rule. */
+    public String getLastNotifiedVersion() {
+        return lastNotifiedVersion == null ? "" : lastNotifiedVersion;
+    }
+
+    public void setLastNotifiedVersion(String lastNotifiedVersion) {
+        this.lastNotifiedVersion = lastNotifiedVersion;
     }
 }

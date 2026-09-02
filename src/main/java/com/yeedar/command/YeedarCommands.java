@@ -9,6 +9,9 @@ import com.yeedar.config.YeedarConfig;
 import com.yeedar.terrain.TerrainCapture;
 import com.yeedar.tracker.JalistScanner;
 import com.yeedar.tracker.PlayerTracker;
+import com.yeedar.update.ModVersion;
+import com.yeedar.update.UpdateChecker;
+import com.yeedar.update.UpdateNotifier;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
 import net.minecraft.client.MinecraftClient;
@@ -123,6 +126,24 @@ public class YeedarCommands {
         sb.append("\u00a77Uploading the chunks you load keeps the map current, and\n"
                 + "\u00a77records where you have been. It is off unless you turn it on.");
         return Text.literal(sb.toString());
+    }
+
+    /**
+     * The running version, with the newer one appended when this session's
+     * check found one. The on-demand answer, so the join notice never has to
+     * be the only chance to see it — and the first thing anyone wants in a bug
+     * report, which status did not previously show at all.
+     */
+    private static String versionLine() {
+        String current = ModVersion.current();
+        if (current.isEmpty()) current = "unknown";
+
+        UpdateChecker.Release latest = UpdateChecker.getLatest();
+        if (UpdateNotifier.shouldNotify(ModVersion.current(), latest, "",
+                YeedarConfig.getInstance().isUpdateCheckEnabled())) {
+            return "§f" + current + " §e(" + latest.version() + " available)";
+        }
+        return "§f" + current;
     }
 
     public static void register() {
@@ -410,6 +431,7 @@ public class YeedarCommands {
 
                                 ctx.getSource().sendFeedback(Text.literal(
                                         "\u00a76--- Yeedar Status ---\n" +
+                                        "\u00a77Version: " + versionLine() + "\n" +
                                         "\u00a77Tracking: " + (config.isTrackingEnabled() ? "\u00a7aON" : "\u00a7cOFF") + "\n" +
                                         "\u00a77Logged in: " + (config.isLoggedIn()
                                                 ? "\u00a7a" + config.getUsername()
