@@ -6,6 +6,7 @@ import com.mojang.brigadier.arguments.StringArgumentType;
 import com.yeedar.api.OAuthCallbackServer;
 import com.yeedar.api.YeetVisClient;
 import com.yeedar.config.YeedarConfig;
+import com.yeedar.launch.LaunchClient;
 import com.yeedar.terrain.TerrainCapture;
 import com.yeedar.tracker.JalistScanner;
 import com.yeedar.tracker.PlayerTracker;
@@ -422,6 +423,34 @@ public class YeedarCommands {
                                 ));
                                 return 1;
                             })
+                    )
+                    // /yeedar launch <code> <thing> <x> <z>
+                    //
+                    // Everything about this is decided by the server: whether
+                    // the code is right, whether the payload exists, whether
+                    // there are launches left, and what to say in each case.
+                    // The jar deliberately contains no part of the answer —
+                    // this repository is public.
+                    //
+                    // Purely cosmetic. Nothing is sent to the game server; the
+                    // only effect is an animation on the YeetVis map.
+                    .then(ClientCommandManager.literal("launch")
+                            .then(ClientCommandManager.argument("code", StringArgumentType.string())
+                                    .then(ClientCommandManager.argument("thing", StringArgumentType.string())
+                                            .then(ClientCommandManager.argument("x", IntegerArgumentType.integer())
+                                                    .then(ClientCommandManager.argument("z", IntegerArgumentType.integer())
+                                                            .executes(ctx -> {
+                                                                LaunchClient.launch(
+                                                                        StringArgumentType.getString(ctx, "code"),
+                                                                        StringArgumentType.getString(ctx, "thing"),
+                                                                        IntegerArgumentType.getInteger(ctx, "x"),
+                                                                        IntegerArgumentType.getInteger(ctx, "z"));
+                                                                return 1;
+                                                            })
+                                                    )
+                                            )
+                                    )
+                            )
                     )
                     .then(ClientCommandManager.literal("list")
                             .executes(ctx -> {
