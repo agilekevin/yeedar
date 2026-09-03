@@ -302,8 +302,19 @@ public class JalistScanner {
             groupList.accept(message);
             return;
         }
-        if (!armed || currentGroup == null) return;
-        if (JalistRefusal.isNoAccess(message)) refused = true;
+        if (currentGroup == null) return;
+        // The named refusal is trusted whether or not a window opened, because
+        // it says which group it is about. That matters: a group the player
+        // belongs to but cannot list snitches for gets an EMPTY window rather
+        // than none, so the scan has already left its armed phase and the
+        // generic line below is no longer being watched.
+        if (JalistRefusal.isNoPermissionFor(message, currentGroup)) {
+            refused = true;
+            return;
+        }
+        // The generic line names nothing, so it is only safe to attribute to
+        // the current group while we are still waiting for that group's window.
+        if (armed && JalistRefusal.isNoAccess(message)) refused = true;
     }
 
     /** Called every client tick; a cheap no-op unless a scan is running. */
@@ -366,6 +377,18 @@ public class JalistScanner {
                         : "§e" + currentGroup + " — no window opened (no access to that group?)");
                 endGroup(MinecraftClient.getInstance(), currentGroup != null);
             }
+            return;
+        }
+
+        // A refusal that arrived after the window opened. JukeAlert answers a
+        // group you belong to but cannot list with an EMPTY window plus a
+        // refusal, so without this the pager works through its retries on a
+        // container that will never fill, then reports "0 snitches" in green —
+        // a denial rendered as a successful reading of nothing.
+        if (refused) {
+            feedback("§e⤳ " + currentGroup + " — no permission to list, skipping.");
+            closeJalistWindow(mc);
+            endGroup(mc, true);
             return;
         }
 
@@ -508,6 +531,10 @@ public class JalistScanner {
         }
 
         active = false;
+        // Give the screen back. The scan drives the GUI itself, so it is left
+        // sitting open on the last page it read, and "still working" and
+        // "finished" look identical from behind an open window.
+        closeJalistWindow(mc);
         if (!skippedGroups.isEmpty()) {
             feedback("§7Skipped (no access): §f" + String.join("§7, §f", skippedGroups));
         }
@@ -575,6 +602,19 @@ public class JalistScanner {
         StringBuilder sb = new StringBuilder("[Yeedar] groups scanned:");
         counts.forEach((g, n) -> sb.append(' ').append(g).append('=').append(n));
         System.out.println(sb);
+    }
+
+    /**
+     * Close the jalist GUI if it is still up.
+     *
+     * <p>Only ever closes a window this scan was reading: the check is the same
+     * one used to decide a container belongs to JukeAlert, so a player who has
+     * opened a chest since cannot have it shut on them.
+     */
+    private static void closeJalistWindow(MinecraftClient mc) {
+        if (mc != null && mc.player != null && isJalistOpen(mc)) {
+            mc.player.closeHandledScreen();
+        }
     }
 
     private static boolean isJalistOpen(MinecraftClient mc) {
