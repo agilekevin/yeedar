@@ -47,6 +47,13 @@ public class JalistScanner {
     private static final int REOPEN_GRACE_TICKS = 200;   // 10s
     private static final int MAX_PAGES = 200;
 
+    // Fully qualified so another plugin's "listgroups" alias cannot answer in
+    // NameLayer's place — a wrong answer here silently removes namelayers from
+    // the scan.
+    private static final String LISTGROUPS_COMMAND = "namelayer:listgroups";
+    private static final int LIST_TIMEOUT_TICKS = 100;   // 5s for the whole listing
+    private static final int LIST_PAGE_GAP_TICKS = 20;   // 1s between page requests
+
     private boolean active = false;
     private boolean armed = false;
     private int armedTicks = 0;
@@ -62,6 +69,11 @@ public class JalistScanner {
     /** Groups the server would not show us. Reported separately from `done`,
      *  because "skipped" and "read, found nothing" are different answers. */
     private final List<String> skippedGroups = new ArrayList<>();
+    /** True while waiting on /namelayer:listgroups, before any jalist runs. */
+    private volatile boolean listing = false;
+    private int listTicks = 0;
+    private int lastPageRequested = 0;
+    private volatile GroupList groupList;
     private int groupStartCount = 0;
     private int totalPages = 0;
     /** Non-zero while waiting for in-flight uploads to finish before
@@ -163,15 +175,77 @@ public class JalistScanner {
         done.clear();
         skippedGroups.clear();
         refused = false;
+        listing = false;
+        groupList = null;
         totalPages = 0;
         queue.addAll(groups);
 
         if (groups.isEmpty()) {
             feedback("§7Scanning every snitch you can see...");
-        } else {
-            feedback("§7Scanning " + groups.size() + " namelayer"
-                    + (groups.size() == 1 ? "" : "s") + ": §f" + String.join("§7, §f", groups));
+            startNextGroup(mc);
+            return;
         }
+
+        // Ask which namelayers this player is actually in before asking
+        // JukeAlert for any of them. The shared defaults are global — set once
+        // in Discord — while membership is per player, so a scanner is
+        // routinely handed groups they cannot read. Each of those costs a
+        // round trip and prints "You do not have access to any group's
+        // snitches": a message about one group, phrased as though the whole
+        // scan had failed.
+        beginGroupListing(mc);
+    }
+
+    /** Ask NameLayer for this player's groups; the scan starts when it lands. */
+    private void beginGroupListing(MinecraftClient mc) {
+        listing = true;
+        listTicks = 0;
+        lastPageRequested = 1;
+        groupList = new GroupList();
+        mc.player.networkHandler.sendChatCommand(LISTGROUPS_COMMAND);
+    }
+
+    /** Drop the defaults this player is not in, then scan what is left. */
+    private void applyGroupFilter(MinecraftClient mc) {
+        listing = false;
+
+        List<String> readable = new ArrayList<>();
+        List<String> notAMember = new ArrayList<>();
+        for (String g : queue) {
+            (groupList.contains(g) ? readable : notAMember).add(g);
+        }
+
+        if (readable.isEmpty()) {
+            // Filtering everything away is far more likely to be a bad reading
+            // than a true answer, and scanning nothing is the one outcome with
+            // no way back.
+            feedback("§eYou are in none of the default namelayers — scanning them anyway.");
+            startNextGroup(mc);
+            return;
+        }
+
+        queue.clear();
+        queue.addAll(readable);
+        if (!notAMember.isEmpty()) {
+            // Said once rather than silently: shared defaults naming groups the
+            // scanner cannot read is worth someone correcting in Discord.
+            feedback("§8Not a member of §7" + String.join("§8, §7", notAMember)
+                    + "§8 — skipped " + notAMember.size() + " of "
+                    + (readable.size() + notAMember.size()) + ".");
+        }
+        feedback("§7Scanning " + readable.size() + " namelayer"
+                + (readable.size() == 1 ? "" : "s") + ": §f" + String.join("§7, §f", readable));
+        startNextGroup(mc);
+    }
+
+    /** Give up on the listing and scan everything, exactly as before. */
+    private void abandonGroupListing(MinecraftClient mc, String why) {
+        listing = false;
+        // The fallback is the old behaviour, never worse: groups that cannot be
+        // read are still skipped the moment JukeAlert refuses them.
+        System.out.println("[Yeedar] group listing " + why + "; scanning all defaults");
+        feedback("§7Scanning " + queue.size() + " namelayer"
+                + (queue.size() == 1 ? "" : "s") + ": §f" + String.join("§7, §f", queue));
         startNextGroup(mc);
     }
 
@@ -221,7 +295,14 @@ public class JalistScanner {
      * next line say so.
      */
     public void onIncomingChat(String message) {
-        if (!active || !armed || currentGroup == null) return;
+        if (!active) return;
+        if (listing) {
+            // The listing arrives as ordinary chat; GroupList ignores anything
+            // that is not a page header or an entry.
+            groupList.accept(message);
+            return;
+        }
+        if (!armed || currentGroup == null) return;
         if (JalistRefusal.isNoAccess(message)) refused = true;
     }
 
@@ -234,6 +315,31 @@ public class JalistScanner {
             return;
         }
         if (!active) return;
+
+        if (listing) {
+            listTicks++;
+            if (groupList.isComplete()) {
+                applyGroupFilter(mc);
+                return;
+            }
+            // Page 1 names the total, so pages 2..N are requested only once we
+            // know they exist. Never filter on a partial listing: concluding
+            // the player is not in a group listed on a page we never read
+            // would silently drop it from the scan, which is worse than the
+            // noise this feature removes.
+            if (listTicks % LIST_PAGE_GAP_TICKS == 0) {
+                int next = groupList.nextMissingPage();
+                if (next > 0 && next != lastPageRequested) {
+                    lastPageRequested = next;
+                    mc.player.networkHandler.sendChatCommand(LISTGROUPS_COMMAND + " " + next);
+                }
+            }
+            if (listTicks > LIST_TIMEOUT_TICKS) {
+                abandonGroupListing(mc, groupList.expectedPages() == 0
+                        ? "never answered" : "was incomplete");
+            }
+            return;
+        }
 
         if (armed) {
             // Waiting for the window the command opens.
