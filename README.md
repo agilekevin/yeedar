@@ -166,7 +166,9 @@ hand, but it looks like this:
   "username": "",
   "detectionRange": 128.0,
   "trackingEnabled": true,
-  "ignoredNames": ["FreeCam"]
+  "ignoredNames": ["FreeCam"],
+  "updateCheckEnabled": true,
+  "lastNotifiedVersion": ""
 }
 ```
 
@@ -175,6 +177,21 @@ hand, but it looks like this:
   `/yeedar toggle`).
 - **`ignoredNames`** — player names to never track. Useful for ignoring utility
   entities such as `FreeCam`. Matching is case-insensitive.
+- **`updateCheckEnabled`** — whether to check for a newer release at startup.
+  Set to `false` to skip the check entirely, network call included.
+- **`lastNotifiedVersion`** — the release you have already been told about, so
+  the notice appears once per version rather than on every login. Not meant to
+  be edited by hand; clear it to see the notice again.
+
+## Updates
+
+Yeedar can't update itself. Once per launch it asks the Releases page whether a
+newer version exists and, if so, says so in chat a few seconds after you join a
+world — once per version, with a link to the download.
+
+`/yeedar status` shows your version, and any newer one, at any time. The check
+is silent whenever it fails, and can be turned off with `updateCheckEnabled`
+above.
 
 ## License
 
