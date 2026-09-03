@@ -43,10 +43,15 @@ public class YeedarClient implements ClientModInitializer {
             NamelayerListener.getInstance().onOutgoingChat("/" + command);
         });
 
-        // Watch incoming chat for namelayer member lists
+        // Watch incoming chat for namelayer member lists, and for JukeAlert
+        // refusing a group mid-scan — that refusal is the fastest way to know
+        // a namelayer is unreadable, and ignoring it costs the scanner its
+        // full arm timeout per group to learn what it was told at once.
         ClientReceiveMessageEvents.GAME.register((message, overlay) -> {
             if (!overlay) {
-                NamelayerListener.getInstance().onIncomingChat(message.getString());
+                String text = message.getString();
+                NamelayerListener.getInstance().onIncomingChat(text);
+                JalistScanner.getInstance().onIncomingChat(text);
             }
         });
 

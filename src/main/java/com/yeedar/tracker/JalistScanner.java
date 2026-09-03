@@ -55,7 +55,13 @@ public class JalistScanner {
      *  unfiltered pass over everything the player can see. */
     private final Deque<String> queue = new ArrayDeque<>();
     private String currentGroup = null;
+    /** Set when JukeAlert refuses the group we just asked for, so the next
+     *  tick can move on instead of sitting out the arm timeout. */
+    private volatile boolean refused = false;
     private final List<String> done = new ArrayList<>();
+    /** Groups the server would not show us. Reported separately from `done`,
+     *  because "skipped" and "read, found nothing" are different answers. */
+    private final List<String> skippedGroups = new ArrayList<>();
     private int groupStartCount = 0;
     private int totalPages = 0;
     /** Non-zero while waiting for in-flight uploads to finish before
@@ -155,6 +161,8 @@ public class JalistScanner {
         allEntries.clear();
         queue.clear();
         done.clear();
+        skippedGroups.clear();
+        refused = false;
         totalPages = 0;
         queue.addAll(groups);
 
@@ -201,6 +209,22 @@ public class JalistScanner {
         }));
     }
 
+    /**
+     * Watch server chat for JukeAlert refusing the group we just asked for.
+     *
+     * <p>Only while armed: once a window is open the scan reads items, and a
+     * refusal arriving then belongs to something else the player typed.
+     *
+     * <p>The refusal reads as though the whole scan has failed — "you do not
+     * have access to any group's snitches" — when it is about this one group
+     * and the scan carries straight on. Acting on it here is what lets the
+     * next line say so.
+     */
+    public void onIncomingChat(String message) {
+        if (!active || !armed || currentGroup == null) return;
+        if (JalistRefusal.isNoAccess(message)) refused = true;
+    }
+
     /** Called every client tick; a cheap no-op unless a scan is running. */
     public void tick(MinecraftClient mc) {
         if (settleTicks >= 0) {
@@ -215,12 +239,26 @@ public class JalistScanner {
             // Waiting for the window the command opens.
             if (isJalistOpen(mc)) {
                 armed = false;
+                refused = false;
+            } else if (refused) {
+                // JukeAlert already told us this group is not readable. Waiting
+                // out the arm timeout after that is ten seconds spent
+                // confirming something we were told immediately — and with a
+                // list of groups, that adds up to most of the scan.
+                armed = false;
+                if (currentGroup != null) {
+                    feedback("§e⤳ " + currentGroup + " — no access, skipping.");
+                }
+                endGroup(MinecraftClient.getInstance(), true);
             } else if (++armedTicks > ARM_TIMEOUT_TICKS) {
+                // Fallback for a refusal we did not recognise, or a server
+                // that simply never answered. Kept at the full timeout: when
+                // access is fine, a slow window is worth waiting for.
                 armed = false;
                 feedback(currentGroup == null
                         ? "§cJukeAlert never opened a window — are you on EdenMC?"
                         : "§e" + currentGroup + " — no window opened (no access to that group?)");
-                endGroup(MinecraftClient.getInstance());
+                endGroup(MinecraftClient.getInstance(), currentGroup != null);
             }
             return;
         }
@@ -333,12 +371,23 @@ public class JalistScanner {
      * safely uploaded matters if it stops early.
      */
     private void endGroup(MinecraftClient mc) {
+        endGroup(mc, false);
+    }
+
+    private void endGroup(MinecraftClient mc, boolean skipped) {
         armed = false;
+        refused = false;
         int found = seenKeys.size() - groupStartCount;
         int pages = pager == null ? 0 : pager.pagesRead();
         totalPages += pages;
 
-        if (currentGroup != null) {
+        if (currentGroup != null && skipped) {
+            // No tick, and not counted as done. A skipped group used to get
+            // the same green "✔ 0 snitches across 0 pages" as a group that was
+            // genuinely empty, which made a permissions problem look like a
+            // successful read of nothing.
+            skippedGroups.add(currentGroup);
+        } else if (currentGroup != null) {
             done.add(currentGroup);
             feedback(String.format("§a✔ %s — %d snitch%s across %d page%s",
                     currentGroup, found, found == 1 ? "" : "es", pages, pages == 1 ? "" : "s"));
@@ -353,8 +402,13 @@ public class JalistScanner {
         }
 
         active = false;
+        if (!skippedGroups.isEmpty()) {
+            feedback("§7Skipped (no access): §f" + String.join("§7, §f", skippedGroups));
+        }
         if (seenKeys.isEmpty()) {
-            feedback("§eNo snitches found — check the namelayer names.");
+            feedback(skippedGroups.isEmpty()
+                    ? "§eNo snitches found — check the namelayer names."
+                    : "§eNo snitches found — you have access to none of these groups.");
             return;
         }
         if (done.isEmpty()) {
