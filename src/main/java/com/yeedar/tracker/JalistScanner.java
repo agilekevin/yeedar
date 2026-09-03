@@ -413,8 +413,16 @@ public class JalistScanner {
                 }
                 finish(null);
             }
-            case GAVE_UP -> finish("§ePage " + (pager.pagesRead() + 1)
-                    + " never arrived — stopping with what was read.");
+            // Reaching here means the window never changed, however many times
+            // we asked. That is ambiguous by nature — a list that ends exactly
+            // on a page boundary looks identical to a click the server ignored
+            // — but retries exist to recover dropped clicks, so once every one
+            // of them has failed the ordinary end of the list is much the
+            // likelier reading. yeetborders holds 2025 snitches, exactly 45
+            // pages of 45, and hits this on every single scan. The old wording
+            // asserted the alarming possibility as fact.
+            case GAVE_UP -> finish("§7Page " + (pager.pagesRead() + 1)
+                    + " never came — normally that just means the list ends here.");
             case CLOSED -> finish("§eScan ended — the jalist window closed.");
             case IDLE -> { }
         }
