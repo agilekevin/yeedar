@@ -45,8 +45,17 @@ class JalistPagerTest {
             else if (wraps) current = 1;
         }
 
+        /** Items on the final page; 45 (a full page) unless set. */
+        int lastPageItems = 45;
+
+        FakeServer lastPageHolding(int items) {
+            this.lastPageItems = items;
+            return this;
+        }
+
         View view() {
-            return new View("page-" + current, 45);
+            int items = (current == pages) ? lastPageItems : 45;
+            return new View("page-" + current, items);
         }
     }
 
@@ -201,5 +210,75 @@ class JalistPagerTest {
         }
         assertEquals(Action.CLICK, next, "should resume clicking from the page it landed on");
         assertTrue(!pager.finished(), "must not have stopped");
+    }
+
+    @Test
+    @DisplayName("a page that is not full ends the scan, without clicking past it")
+    void partialPageIsTheEndOfTheList() {
+        // JukeAlert fills 45 slots a page, so a short page is the last one.
+        // The pager used to click "next" from there, wait out every retry on a
+        // page that does not exist, and report "Page N never arrived" — the
+        // normal end of a list rendered as a failure, at about twelve seconds
+        // and one alarming message per group.
+        var pager = new JalistPager(GAP, WAIT, RETRIES, GRACE, MAX_PAGES);
+        var server = new FakeServer(5, false).lastPageHolding(34);
+        var r = run(pager, server, 500);
+
+        assertEquals(List.of(1, 2, 3, 4, 5), r.read);
+        assertEquals(Action.DONE, r.ending);
+        assertEquals(5, pager.pagesRead());
+    }
+
+    @Test
+    @DisplayName("the short final page is still read, not discarded")
+    void partialPageIsStillRead() {
+        // Ending early must not cost the 34 snitches that page was carrying.
+        var pager = new JalistPager(GAP, WAIT, RETRIES, GRACE, MAX_PAGES);
+        var server = new FakeServer(3, false).lastPageHolding(1);
+        var r = run(pager, server, 500);
+
+        assertTrue(r.read.contains(3), "the final page must be read before stopping");
+        assertEquals(Action.DONE, r.ending);
+    }
+
+    @Test
+    @DisplayName("a full final page still ends by wrapping, as before")
+    void fullFinalPageStillWraps() {
+        // The old path has to keep working: when the last page happens to be
+        // exactly full there is nothing to notice, and the scan ends by seeing
+        // the list wrap around to page one.
+        var pager = new JalistPager(GAP, WAIT, RETRIES, GRACE, MAX_PAGES);
+        var server = new FakeServer(4, true);   // every page full
+        var r = run(pager, server, 500);
+
+        assertEquals(List.of(1, 2, 3, 4), r.read);
+        assertEquals(Action.DONE, r.ending);
+    }
+
+    @Test
+    @DisplayName("an empty page is not mistaken for a short one")
+    void emptyPageIsNotAPartialPage() {
+        // Zero items means the container is not populated yet, which the
+        // closed-window path already handles. Treating it as "a short page,
+        // therefore the end" would stop a scan before it started.
+        var pager = new JalistPager(GAP, WAIT, RETRIES, GRACE, MAX_PAGES);
+        var server = new FakeServer(3, false).lastPageHolding(0);
+        var r = run(pager, server, 500);
+
+        assertTrue(r.read.contains(1), "the scan must still read real pages");
+    }
+
+    @Test
+    @DisplayName("a full last page on a non-wrapping list still gives up, as before")
+    void fullLastPageOnANonWrappingListStillGivesUp() {
+        // The remaining gap, stated rather than pretended away: when the final
+        // page happens to hold exactly 45 there is nothing to notice, so the
+        // scan still ends by exhausting its retries. Everything read is kept.
+        var pager = new JalistPager(GAP, WAIT, RETRIES, GRACE, MAX_PAGES);
+        var server = new FakeServer(3, false);   // every page full, no wrap
+        var r = run(pager, server, 500);
+
+        assertEquals(List.of(1, 2, 3), r.read);
+        assertEquals(Action.GAVE_UP, r.ending);
     }
 }

@@ -3,7 +3,9 @@ package com.yeedar.tracker;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class JalistRefusalTest {
@@ -70,5 +72,57 @@ class JalistRefusalTest {
         // than the ten seconds this fix exists to save.
         assertFalse(JalistRefusal.isNoAccess("Player granted access to yeet"));
         assertFalse(JalistRefusal.isNoAccess("You now have access to any group's snitches"));
+    }
+
+    // -- Named per-group refusal -------------------------------------------
+    //
+    // JukeAlert sends two lines when it will not list a group. The generic one
+    // above is what the report was about; this one names the group, which is
+    // strictly better because it can be attributed to the group being scanned
+    // rather than merely to "something was refused just now".
+    //
+    // It also covers a case the generic handling misses entirely. For a group
+    // the player is not in, no window opens and the arm timeout is watching.
+    // For a group the player IS in but cannot list snitches for, an EMPTY
+    // window opens, the scan leaves the armed phase, and the refusal was
+    // ignored -- costing a pager timeout and then reporting a green tick for
+    // "0 snitches" when the truth was "denied".
+
+    @Test
+    @DisplayName("the named refusal yields the group it is about")
+    void namesTheGroup() {
+        assertEquals("YEETaccess", JalistRefusal.noPermissionGroup(
+                "You do not have permission to list snitches for the group YEETaccess"));
+    }
+
+    @Test
+    @DisplayName("colour codes and trailing punctuation do not matter")
+    void namedRefusalTolerantOfFormatting() {
+        assertEquals("YEETaccess", JalistRefusal.noPermissionGroup(
+                "\u00a7cYou do not have permission to list snitches for the group YEETaccess."));
+    }
+
+    @Test
+    @DisplayName("the group is matched against the scan without regard to case")
+    void namedRefusalMatchesCaseInsensitively() {
+        // JukeAlert answers in the server's casing while the defaults are
+        // stored lowercase -- the same trap the group filter hit.
+        assertTrue(JalistRefusal.isNoPermissionFor(
+                "You do not have permission to list snitches for the group YEETaccess",
+                "yeetaccess"));
+        assertFalse(JalistRefusal.isNoPermissionFor(
+                "You do not have permission to list snitches for the group YEETaccess",
+                "yeetborders"));
+    }
+
+    @Test
+    @DisplayName("ordinary chat names no group")
+    void namedRefusalIgnoresChatter() {
+        assertNull(JalistRefusal.noPermissionGroup("You do not have access to any group's snitches."));
+        assertNull(JalistRefusal.noPermissionGroup("Retrieving snitches for a total of 1 group instances."));
+        assertNull(JalistRefusal.noPermissionGroup(""));
+        assertNull(JalistRefusal.noPermissionGroup(null));
+        assertFalse(JalistRefusal.isNoPermissionFor("hello", "yeet"));
+        assertFalse(JalistRefusal.isNoPermissionFor(null, "yeet"));
     }
 }

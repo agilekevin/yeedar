@@ -47,6 +47,13 @@ public class JalistScanner {
     private static final int REOPEN_GRACE_TICKS = 200;   // 10s
     private static final int MAX_PAGES = 200;
 
+    // Fully qualified so another plugin's "listgroups" alias cannot answer in
+    // NameLayer's place — a wrong answer here silently removes namelayers from
+    // the scan.
+    private static final String LISTGROUPS_COMMAND = "namelayer:listgroups";
+    private static final int LIST_TIMEOUT_TICKS = 100;   // 5s for the whole listing
+    private static final int LIST_PAGE_GAP_TICKS = 20;   // 1s between page requests
+
     private boolean active = false;
     private boolean armed = false;
     private int armedTicks = 0;
@@ -62,6 +69,14 @@ public class JalistScanner {
     /** Groups the server would not show us. Reported separately from `done`,
      *  because "skipped" and "read, found nothing" are different answers. */
     private final List<String> skippedGroups = new ArrayList<>();
+    /** True while waiting on /namelayer:listgroups, before any jalist runs. */
+    /** Attributes JukeAlert's refusals to the right group. See RefusalWatcher:
+     *  the refusals arrive in pairs and only the first names anything. */
+    private final RefusalWatcher refusals = new RefusalWatcher();
+    private volatile boolean listing = false;
+    private int listTicks = 0;
+    private int lastPageRequested = 0;
+    private volatile GroupList groupList;
     private int groupStartCount = 0;
     private int totalPages = 0;
     /** Non-zero while waiting for in-flight uploads to finish before
@@ -163,15 +178,78 @@ public class JalistScanner {
         done.clear();
         skippedGroups.clear();
         refused = false;
+        refusals.reset();
+        listing = false;
+        groupList = null;
         totalPages = 0;
         queue.addAll(groups);
 
         if (groups.isEmpty()) {
             feedback("§7Scanning every snitch you can see...");
-        } else {
-            feedback("§7Scanning " + groups.size() + " namelayer"
-                    + (groups.size() == 1 ? "" : "s") + ": §f" + String.join("§7, §f", groups));
+            startNextGroup(mc);
+            return;
         }
+
+        // Ask which namelayers this player is actually in before asking
+        // JukeAlert for any of them. The shared defaults are global — set once
+        // in Discord — while membership is per player, so a scanner is
+        // routinely handed groups they cannot read. Each of those costs a
+        // round trip and prints "You do not have access to any group's
+        // snitches": a message about one group, phrased as though the whole
+        // scan had failed.
+        beginGroupListing(mc);
+    }
+
+    /** Ask NameLayer for this player's groups; the scan starts when it lands. */
+    private void beginGroupListing(MinecraftClient mc) {
+        listing = true;
+        listTicks = 0;
+        lastPageRequested = 1;
+        groupList = new GroupList();
+        mc.player.networkHandler.sendChatCommand(LISTGROUPS_COMMAND);
+    }
+
+    /** Drop the defaults this player is not in, then scan what is left. */
+    private void applyGroupFilter(MinecraftClient mc) {
+        listing = false;
+
+        List<String> readable = new ArrayList<>();
+        List<String> notAMember = new ArrayList<>();
+        for (String g : queue) {
+            (groupList.contains(g) ? readable : notAMember).add(g);
+        }
+
+        if (readable.isEmpty()) {
+            // Filtering everything away is far more likely to be a bad reading
+            // than a true answer, and scanning nothing is the one outcome with
+            // no way back.
+            feedback("§eYou are in none of the default namelayers — scanning them anyway.");
+            startNextGroup(mc);
+            return;
+        }
+
+        queue.clear();
+        queue.addAll(readable);
+        if (!notAMember.isEmpty()) {
+            // Said once rather than silently: shared defaults naming groups the
+            // scanner cannot read is worth someone correcting in Discord.
+            feedback("§8Not a member of §7" + String.join("§8, §7", notAMember)
+                    + "§8 — skipped " + notAMember.size() + " of "
+                    + (readable.size() + notAMember.size()) + ".");
+        }
+        feedback("§7Scanning " + readable.size() + " namelayer"
+                + (readable.size() == 1 ? "" : "s") + ": §f" + String.join("§7, §f", readable));
+        startNextGroup(mc);
+    }
+
+    /** Give up on the listing and scan everything, exactly as before. */
+    private void abandonGroupListing(MinecraftClient mc, String why) {
+        listing = false;
+        // The fallback is the old behaviour, never worse: groups that cannot be
+        // read are still skipped the moment JukeAlert refuses them.
+        System.out.println("[Yeedar] group listing " + why + "; scanning all defaults");
+        feedback("§7Scanning " + queue.size() + " namelayer"
+                + (queue.size() == 1 ? "" : "s") + ": §f" + String.join("§7, §f", queue));
         startNextGroup(mc);
     }
 
@@ -180,6 +258,7 @@ public class JalistScanner {
         currentGroup = queue.poll();
         armed = true;
         armedTicks = 0;
+        refusals.beginGroup(currentGroup);
         groupStartCount = seenKeys.size();
         pager = new JalistPager(GAP_TICKS, WAIT_TICKS, MAX_RETRIES,
                 REOPEN_GRACE_TICKS, MAX_PAGES);
@@ -221,8 +300,18 @@ public class JalistScanner {
      * next line say so.
      */
     public void onIncomingChat(String message) {
-        if (!active || !armed || currentGroup == null) return;
-        if (JalistRefusal.isNoAccess(message)) refused = true;
+        if (!active) return;
+        if (listing) {
+            // The listing arrives as ordinary chat; GroupList ignores anything
+            // that is not a page header or an entry.
+            groupList.accept(message);
+            return;
+        }
+        if (currentGroup == null) return;
+        // All of the reasoning about which group a refusal belongs to lives in
+        // RefusalWatcher, where it is tested against real captured chat.
+        refusals.onChat(message);
+        if (refusals.isRefused()) refused = true;
     }
 
     /** Called every client tick; a cheap no-op unless a scan is running. */
@@ -235,11 +324,37 @@ public class JalistScanner {
         }
         if (!active) return;
 
+        if (listing) {
+            listTicks++;
+            if (groupList.isComplete()) {
+                applyGroupFilter(mc);
+                return;
+            }
+            // Page 1 names the total, so pages 2..N are requested only once we
+            // know they exist. Never filter on a partial listing: concluding
+            // the player is not in a group listed on a page we never read
+            // would silently drop it from the scan, which is worse than the
+            // noise this feature removes.
+            if (listTicks % LIST_PAGE_GAP_TICKS == 0) {
+                int next = groupList.nextMissingPage();
+                if (next > 0 && next != lastPageRequested) {
+                    lastPageRequested = next;
+                    mc.player.networkHandler.sendChatCommand(LISTGROUPS_COMMAND + " " + next);
+                }
+            }
+            if (listTicks > LIST_TIMEOUT_TICKS) {
+                abandonGroupListing(mc, groupList.expectedPages() == 0
+                        ? "never answered" : "was incomplete");
+            }
+            return;
+        }
+
         if (armed) {
             // Waiting for the window the command opens.
             if (isJalistOpen(mc)) {
                 armed = false;
                 refused = false;
+                refusals.windowOpened();
             } else if (refused) {
                 // JukeAlert already told us this group is not readable. Waiting
                 // out the arm timeout after that is ten seconds spent
@@ -260,6 +375,18 @@ public class JalistScanner {
                         : "§e" + currentGroup + " — no window opened (no access to that group?)");
                 endGroup(MinecraftClient.getInstance(), currentGroup != null);
             }
+            return;
+        }
+
+        // A refusal that arrived after the window opened. JukeAlert answers a
+        // group you belong to but cannot list with an EMPTY window plus a
+        // refusal, so without this the pager works through its retries on a
+        // container that will never fill, then reports "0 snitches" in green —
+        // a denial rendered as a successful reading of nothing.
+        if (refused) {
+            feedback("§e⤳ " + currentGroup + " — no permission to list, skipping.");
+            closeJalistWindow(mc);
+            endGroup(mc, true);
             return;
         }
 
@@ -286,8 +413,16 @@ public class JalistScanner {
                 }
                 finish(null);
             }
-            case GAVE_UP -> finish("§ePage " + (pager.pagesRead() + 1)
-                    + " never arrived — stopping with what was read.");
+            // Reaching here means the window never changed, however many times
+            // we asked. That is ambiguous by nature — a list that ends exactly
+            // on a page boundary looks identical to a click the server ignored
+            // — but retries exist to recover dropped clicks, so once every one
+            // of them has failed the ordinary end of the list is much the
+            // likelier reading. yeetborders holds 2025 snitches, exactly 45
+            // pages of 45, and hits this on every single scan. The old wording
+            // asserted the alarming possibility as fact.
+            case GAVE_UP -> finish("§7Page " + (pager.pagesRead() + 1)
+                    + " never came — normally that just means the list ends here.");
             case CLOSED -> finish("§eScan ended — the jalist window closed.");
             case IDLE -> { }
         }
@@ -402,6 +537,10 @@ public class JalistScanner {
         }
 
         active = false;
+        // Give the screen back. The scan drives the GUI itself, so it is left
+        // sitting open on the last page it read, and "still working" and
+        // "finished" look identical from behind an open window.
+        closeJalistWindow(mc);
         if (!skippedGroups.isEmpty()) {
             feedback("§7Skipped (no access): §f" + String.join("§7, §f", skippedGroups));
         }
@@ -469,6 +608,19 @@ public class JalistScanner {
         StringBuilder sb = new StringBuilder("[Yeedar] groups scanned:");
         counts.forEach((g, n) -> sb.append(' ').append(g).append('=').append(n));
         System.out.println(sb);
+    }
+
+    /**
+     * Close the jalist GUI if it is still up.
+     *
+     * <p>Only ever closes a window this scan was reading: the check is the same
+     * one used to decide a container belongs to JukeAlert, so a player who has
+     * opened a chest since cannot have it shut on them.
+     */
+    private static void closeJalistWindow(MinecraftClient mc) {
+        if (mc != null && mc.player != null && isJalistOpen(mc)) {
+            mc.player.closeHandledScreen();
+        }
     }
 
     private static boolean isJalistOpen(MinecraftClient mc) {

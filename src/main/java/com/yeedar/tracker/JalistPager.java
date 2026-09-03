@@ -70,6 +70,12 @@ public final class JalistPager {
     private int closedTicks = 0;
     private boolean awaitingPage = false;
     private boolean finished = false;
+    /** Set when the page just read had spare slots, which makes it the last. */
+    private boolean lastPageWasShort = false;
+
+    /** Snitch slots on a full jalist page: a 54-slot container, the rest of it
+     *  navigation. A page holding fewer is the end of the list. */
+    private static final int FULL_PAGE = 45;
 
     public JalistPager(int gapTicks, int waitTicks, int maxRetries,
                        int reopenGraceTicks, int maxPages) {
@@ -108,6 +114,13 @@ public final class JalistPager {
 
         // Same contents as the page we last read: nothing has changed yet.
         if (view.fingerprint.equals(lastRead)) {
+            // ...unless that page was short, in which case it was the last one
+            // and there is nothing left to wait for. Clicking on from here asks
+            // for a page that does not exist, and the live server answers by
+            // leaving the window exactly where it is — so the scan spent every
+            // retry and then reported "Page N never arrived", which is the
+            // ordinary end of a list dressed up as a failure.
+            if (lastPageWasShort) return finish(Action.DONE);
             if (awaitingPage && ++sinceClick > waitTicks) return retryOrGiveUp();
             if (!awaitingPage && ++sinceRead >= gapTicks) {
                 sinceRead = 0;
@@ -151,6 +164,14 @@ public final class JalistPager {
         sinceClick = 0;
         sinceRead = 0;
         if (pagesRead >= maxPages) return finish(Action.DONE);
+        // JukeAlert fills every page before starting another, so a page with
+        // room to spare is the last one. Noted rather than acted on here: this
+        // page still has to be READ, and the scan ends on the next tick.
+        //
+        // Zero is excluded deliberately — that means the container is not
+        // populated yet, which the no-window path above owns, and treating it
+        // as "short, therefore finished" would end a scan before it began.
+        lastPageWasShort = view.snitchCount > 0 && view.snitchCount < FULL_PAGE;
         return Action.READ;
     }
 
