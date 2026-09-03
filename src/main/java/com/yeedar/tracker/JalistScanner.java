@@ -70,6 +70,9 @@ public class JalistScanner {
      *  because "skipped" and "read, found nothing" are different answers. */
     private final List<String> skippedGroups = new ArrayList<>();
     /** True while waiting on /namelayer:listgroups, before any jalist runs. */
+    /** Attributes JukeAlert's refusals to the right group. See RefusalWatcher:
+     *  the refusals arrive in pairs and only the first names anything. */
+    private final RefusalWatcher refusals = new RefusalWatcher();
     private volatile boolean listing = false;
     private int listTicks = 0;
     private int lastPageRequested = 0;
@@ -175,6 +178,7 @@ public class JalistScanner {
         done.clear();
         skippedGroups.clear();
         refused = false;
+        refusals.reset();
         listing = false;
         groupList = null;
         totalPages = 0;
@@ -254,6 +258,7 @@ public class JalistScanner {
         currentGroup = queue.poll();
         armed = true;
         armedTicks = 0;
+        refusals.beginGroup(currentGroup);
         groupStartCount = seenKeys.size();
         pager = new JalistPager(GAP_TICKS, WAIT_TICKS, MAX_RETRIES,
                 REOPEN_GRACE_TICKS, MAX_PAGES);
@@ -303,18 +308,10 @@ public class JalistScanner {
             return;
         }
         if (currentGroup == null) return;
-        // The named refusal is trusted whether or not a window opened, because
-        // it says which group it is about. That matters: a group the player
-        // belongs to but cannot list snitches for gets an EMPTY window rather
-        // than none, so the scan has already left its armed phase and the
-        // generic line below is no longer being watched.
-        if (JalistRefusal.isNoPermissionFor(message, currentGroup)) {
-            refused = true;
-            return;
-        }
-        // The generic line names nothing, so it is only safe to attribute to
-        // the current group while we are still waiting for that group's window.
-        if (armed && JalistRefusal.isNoAccess(message)) refused = true;
+        // All of the reasoning about which group a refusal belongs to lives in
+        // RefusalWatcher, where it is tested against real captured chat.
+        refusals.onChat(message);
+        if (refusals.isRefused()) refused = true;
     }
 
     /** Called every client tick; a cheap no-op unless a scan is running. */
@@ -357,6 +354,7 @@ public class JalistScanner {
             if (isJalistOpen(mc)) {
                 armed = false;
                 refused = false;
+                refusals.windowOpened();
             } else if (refused) {
                 // JukeAlert already told us this group is not readable. Waiting
                 // out the arm timeout after that is ten seconds spent
