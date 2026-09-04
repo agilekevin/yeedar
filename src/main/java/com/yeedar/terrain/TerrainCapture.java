@@ -49,6 +49,11 @@ public final class TerrainCapture {
     private int sampleCounter = 0;
     private int uploadCounter = 0;
     private Object lastWorld = null;
+    /** The dimension the buffered chunks were sampled in. Held rather than
+     *  read at upload time: the player may have walked through a portal since,
+     *  and asking "where am I now" would relabel them, which is the bug this
+     *  change exists to fix. */
+    private String sampledDimension = Dimensions.UNKNOWN;
     /** Where the last sweep stopped, so successive sweeps cover the whole
      *  window instead of re-reading its first few chunks forever. */
     private int sweepCursor = 0;
@@ -201,9 +206,15 @@ public final class TerrainCapture {
             // hour-long penalty would look like the feature is broken.
             backoff.succeeded();
             lastWorld = client.world;
+            sampledDimension = Dimensions.of(client.world);
         }
 
         if (!YeedarConfig.getInstance().isMappingEnabled()) return;
+
+        // Somewhere we cannot name is somewhere we must not file chunks under.
+        // Storing them as "unknown" would poison a layer nobody could identify
+        // later, which is exactly the cleanup this change follows.
+        if (!Dimensions.isMappable(sampledDimension)) return;
 
         if (++sampleCounter >= SAMPLE_INTERVAL) {
             sampleCounter = 0;
@@ -285,7 +296,7 @@ public final class TerrainCapture {
         if (!backoff.allow()) return;
         try {
             List<ChunkPlanes> batch = buffer.drain(TerrainUploader.MAX_BATCH);
-            TerrainUploader.upload(batch, buffer,
+            TerrainUploader.upload(sampledDimension, batch, buffer,
                     ok -> { if (ok) backoff.succeeded(); else backoff.failed(); });
         } catch (RuntimeException e) {
             backoff.failed();

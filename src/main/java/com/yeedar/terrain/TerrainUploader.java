@@ -24,9 +24,9 @@ public final class TerrainUploader {
      * `onOutcome` runs there too, for the same reason — it drives the caller's
      * retry backoff, which is read from the tick.
      */
-    public static void upload(List<ChunkPlanes> batch, TerrainBuffer buffer,
+    public static void upload(String world, List<ChunkPlanes> batch, TerrainBuffer buffer,
                               Consumer<Boolean> onOutcome) {
-        YeetVisClient.uploadTerrain(batch).thenAccept(ok ->
+        YeetVisClient.uploadTerrain(world, batch).thenAccept(ok ->
                 MinecraftClient.getInstance().execute(() -> {
                     if (ok) buffer.sent(batch);
                     else buffer.failed(batch);
