@@ -78,9 +78,17 @@ class CaveScanTest {
     }
 
     @Test
-    @DisplayName("a floor at the very first y is found")
-    void floorAtTheTop() {
-        assertEquals(126, CaveScan.floorY(y -> false, NO_BEDROCK, 126, 1));
+    @DisplayName("solid from the ceiling down has no floor to show")
+    void solidFromTheCeilingHasNoFloor() {
+        // This asserted 126 when the scan took the first solid block below the
+        // ceiling. Real captured chunks proved that wrong: under the bedrock
+        // roof the Nether is solid netherrack for a good depth, so "first
+        // solid" was the underside of the roof mass and every column came back
+        // between 121 and 126 — a flat sheet nobody could stand on.
+        //
+        // A column with no open space in it has no floor worth drawing, so the
+        // answer is now nothing rather than the ceiling.
+        assertEquals(CaveScan.NONE, CaveScan.floorY(y -> false, NO_BEDROCK, 126, 1));
     }
 
     @Test

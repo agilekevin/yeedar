@@ -53,10 +53,21 @@ public final class CaveScan {
      * what is visible from above.
      */
     public static int floorY(IntPredicate isAir, IntPredicate isBedrock, int fromY, int toY) {
-        for (int y = fromY; y >= toY; y--) {
-            if (isAir.test(y)) continue;
-            if (isBedrock.test(y)) continue;
-            return y;
+        // Phase one: get out from under the ceiling. Below the bedrock roof the
+        // Nether is solid netherrack for a good depth, so the first non-air
+        // block is the underside of that mass rather than anywhere anyone
+        // stands. The first version stopped there and captured chunks came back
+        // with every column between 121 and 126 — a flat sheet just under the
+        // roof, which is what sent this back for a rewrite.
+        int y = fromY;
+        while (y >= toY && !isAir.test(y)) y--;
+
+        // Phase two: the floor of that open space. Bedrock is still skipped —
+        // the roof hangs down irregularly and a stray block of it inside the
+        // gap is not ground.
+        while (y >= toY) {
+            if (!isAir.test(y) && !isBedrock.test(y)) return y;
+            y--;
         }
         return NONE;
     }
