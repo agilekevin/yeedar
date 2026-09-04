@@ -100,6 +100,15 @@ public final class SurfaceSampler {
             return null;   // outside the mapped world; nothing to say about it
         }
 
+        // The Nether gets cave mode, and only the Nether. Eden permits it
+        // there and nowhere else, so the decision is taken from the world
+        // itself rather than left to a caller to remember: cave mode in the
+        // overworld is a rules breach, not a bug, and this makes it
+        // unreachable rather than merely unintended.
+        if (Dimensions.allowsCaveMode(Dimensions.of(world))) {
+            return sampleCaves(world, chunk, pos);
+        }
+
         Heightmap surface = chunk.getHeightmap(Heightmap.Type.WORLD_SURFACE);
         if (surface == null) return null;
 
@@ -149,6 +158,48 @@ public final class SurfaceSampler {
                 String blockId = Registries.BLOCK.getId(state.getBlock()).toString();
                 int mapColor = state.getMapColor(world, cursor).id;
                 planes.set(ChunkPlanes.index(x, z), blockId, mapColor, y, top);
+            }
+        }
+        return planes;
+    }
+
+    /**
+     * The Nether floor, found by scanning down from below the bedrock ceiling.
+     *
+     * <p>Kept separate from the heightmap path rather than folded into it with
+     * a flag: the two read the world in genuinely different ways, and only one
+     * of them is permitted outside the Nether. A single method with a branch
+     * would make that boundary a detail instead of a wall.
+     */
+    private static ChunkPlanes sampleCaves(ClientWorld world, WorldChunk chunk, ChunkPos pos) {
+        ChunkPlanes planes = new ChunkPlanes(pos.x, pos.z);
+        BlockPos.Mutable cursor = new BlockPos.Mutable();
+
+        for (int z = 0; z < ChunkPlanes.SIDE; z++) {
+            for (int x = 0; x < ChunkPlanes.SIDE; x++) {
+                int worldX = pos.getStartX() + x;
+                int worldZ = pos.getStartZ() + z;
+
+                int y = CaveScan.floorY(
+                        yy -> world.getBlockState(cursor.set(worldX, yy, worldZ)).isAir(),
+                        yy -> world.getBlockState(cursor.set(worldX, yy, worldZ))
+                                .isOf(Blocks.BEDROCK),
+                        CaveScan.NETHER_TOP, CaveScan.NETHER_BOTTOM);
+
+                // Nothing but air and bedrock in this column. Rare, and not
+                // something to guess a height for — the chunk is skipped
+                // whole, the same answer the heightmap path gives when it has
+                // nothing yet.
+                if (y == CaveScan.NONE) return null;
+
+                BlockState state = world.getBlockState(cursor.set(worldX, y, worldZ));
+                String blockId = Registries.BLOCK.getId(state.getBlock()).toString();
+                int mapColor = state.getMapColor(world, cursor).id;
+                // Floor and top are the same block here. The overworld uses
+                // the gap between them to record water depth; the Nether has
+                // no equivalent, since lava is opaque and is the surface
+                // rather than something seen through.
+                planes.set(ChunkPlanes.index(x, z), blockId, mapColor, y, y);
             }
         }
         return planes;

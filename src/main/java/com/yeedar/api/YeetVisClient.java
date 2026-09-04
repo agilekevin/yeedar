@@ -8,6 +8,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import com.yeedar.terrain.ChunkPlanes;
+import com.yeedar.terrain.Dimensions;
 import com.yeedar.tracker.JalistEntry;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.text.Text;
@@ -62,7 +63,10 @@ public class YeetVisClient {
         payload.put("x", (int) x);
         payload.put("y", (int) y);
         payload.put("z", (int) z);
-        payload.put("world", "overworld");
+        // The dimension actually observed in. This was the literal "overworld"
+        // for every sighting Yeedar ever sent, which on a 1:1 server put Nether
+        // sightings on top of the overworld rather than somewhere obviously odd.
+        payload.put("world", Dimensions.of(MinecraftClient.getInstance().world));
         payload.put("snitch_name", "yeedar-" + (entered ? "enter" : "leave"));
         payload.put("group", friendly ? "yeedar-known" : "yeedar-unknown");
         String reporter = config.getUsername().isEmpty() ? "unknown" : config.getUsername();
@@ -196,7 +200,7 @@ public class YeetVisClient {
      * watching, so a failed batch would be silently lost if this fired and
      * forgot like that one does.
      */
-    public static CompletableFuture<Boolean> uploadTerrain(List<ChunkPlanes> batch) {
+    public static CompletableFuture<Boolean> uploadTerrain(String world, List<ChunkPlanes> batch) {
         YeedarConfig config = YeedarConfig.getInstance();
         Unconfigured why = unconfiguredReason();
         if (why != null) {
@@ -220,7 +224,10 @@ public class YeetVisClient {
         }
 
         Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("world", "overworld");
+        // Passed in rather than read here: these chunks were sampled some time
+        // ago, and the player may have changed dimension since. Asking "where
+        // am I now" would relabel them, which is the bug being fixed.
+        payload.put("world", world);
         payload.put("chunks", rows);
 
         HttpRequest request = HttpRequest.newBuilder()
