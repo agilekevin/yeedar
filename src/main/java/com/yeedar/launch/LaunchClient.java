@@ -2,6 +2,7 @@ package com.yeedar.launch;
 
 import com.google.gson.Gson;
 import com.yeedar.config.YeedarConfig;
+import com.yeedar.net.EdenServer;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.text.Text;
 
@@ -50,6 +51,14 @@ public final class LaunchClient {
 
     public static void launch(String code, String thing, int x, int z) {
         YeedarConfig config = YeedarConfig.getInstance();
+        if (!EdenServer.connected()) {
+            // Silent by design, like every other gated path. The log line is
+            // the only trace, so that "the command does nothing" is at least
+            // answerable from latest.log.
+            System.out.println("[Yeedar] ignoring launch — not connected to "
+                    + EdenServer.HOST);
+            return;
+        }
         if (!config.isLoggedIn()) {
             say("§cNot logged in. §7Run §f/yeedar login§7 first.");
             return;

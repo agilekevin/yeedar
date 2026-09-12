@@ -2,6 +2,7 @@ package com.yeedar.api;
 
 import com.google.gson.Gson;
 import com.yeedar.config.YeedarConfig;
+import com.yeedar.net.EdenServer;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -52,6 +53,9 @@ public class YeetVisClient {
 
         if (baseUrl == null || baseUrl.isEmpty()) return;
         if (token == null || token.isEmpty()) return;
+        // Backstop. PlayerTracker already stops sweeping off Eden; this is
+        // here so a future caller cannot reintroduce the leak by accident.
+        if (!EdenServer.connected()) return;
 
         if (!checkRateLimit()) {
             System.err.println("[Yeedar] Rate limited, skipping API call");
@@ -149,6 +153,17 @@ public class YeetVisClient {
         String baseUrl = config.getApiBaseUrl();
         String token = config.getToken();
 
+        if (!EdenServer.connected()) {
+            // Silent to the player by design; still counted, because a scan
+            // that stored nothing must not report success. In practice
+            // unreachable — JukeAlert only exists on Eden, so a scan
+            // elsewhere never gets far enough to have rows to send.
+            System.out.println("[Yeedar] skipping jalist upload — not connected to "
+                    + EdenServer.HOST);
+            failed.addAndGet(entries.size());
+            return;
+        }
+
         Unconfigured why = unconfiguredReason();
         if (why != null) {
             // This used to return silently to stderr, which is how a 150-page
@@ -202,6 +217,15 @@ public class YeetVisClient {
      */
     public static CompletableFuture<Boolean> uploadTerrain(String world, List<ChunkPlanes> batch) {
         YeedarConfig config = YeedarConfig.getInstance();
+        if (!EdenServer.connected()) {
+            // Backstop behind TerrainCapture's own check. Returning false
+            // hands the batch back to the buffer rather than dropping it, so
+            // chunks sampled just before a disconnect survive the reconnect.
+            System.out.println("[Yeedar] skipping terrain upload — not connected to "
+                    + EdenServer.HOST);
+            return CompletableFuture.completedFuture(false);
+        }
+
         Unconfigured why = unconfiguredReason();
         if (why != null) {
             System.err.println("[Yeedar] skipping terrain upload — " + why.problem());
