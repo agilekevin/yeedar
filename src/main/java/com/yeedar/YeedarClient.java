@@ -2,6 +2,8 @@ package com.yeedar;
 
 import com.yeedar.command.YeedarCommands;
 import com.yeedar.config.YeedarConfig;
+import com.yeedar.net.EdenServer;
+import com.yeedar.net.OffEdenNotice;
 import com.yeedar.terrain.TerrainCapture;
 import com.yeedar.tracker.FriendlyTracker;
 import com.yeedar.tracker.JalistScanner;
@@ -25,11 +27,15 @@ public class YeedarClient implements ClientModInitializer {
     private int friendlyRefreshCounter = 0;
     private static final int FRIENDLY_REFRESH_INTERVAL = 600; // ticks = 30 seconds
 
-    /** Ticks left before the update notice is printed, or -1 for "nothing
+    /** Ticks left before the join notices are printed, or -1 for "nothing
      *  pending". Sending straight from the join event races the server's own
-     *  join spam and the notice scrolls away unread, so it waits a moment. */
-    private int updateNoticeCountdown = -1;
-    private static final int UPDATE_NOTICE_DELAY = 60; // ticks = 3 seconds
+     *  join spam and a notice scrolls away unread, so it waits a moment. */
+    private int joinNoticeCountdown = -1;
+    private static final int JOIN_NOTICE_DELAY = 60; // ticks = 3 seconds
+
+    /** Whether this launch has already said Yeedar does not upload here.
+     *  Per launch rather than per join, so relogging does not repeat it. */
+    private boolean offEdenNoticeShown = false;
 
     @Override
     public void onInitializeClient() {
@@ -57,19 +63,20 @@ public class YeedarClient implements ClientModInitializer {
                 FriendlyTracker.getInstance().refresh();
             }
 
-            if (updateNoticeCountdown > 0) {
-                updateNoticeCountdown--;
-                if (updateNoticeCountdown == 0) {
-                    updateNoticeCountdown = -1;
+            if (joinNoticeCountdown > 0) {
+                joinNoticeCountdown--;
+                if (joinNoticeCountdown == 0) {
+                    joinNoticeCountdown = -1;
                     sendUpdateNotice(client);
+                    sendOffEdenNotice(client);
                 }
             }
         });
 
-        // Arm the update notice on join. The check is async and a fast join can
+        // Arm the join notices. The update check is async and a fast join can
         // beat it; that join is simply quiet and the next one picks it up.
         ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> {
-            updateNoticeCountdown = UPDATE_NOTICE_DELAY;
+            joinNoticeCountdown = JOIN_NOTICE_DELAY;
         });
 
         // Watch outgoing commands for /nllm (command string has no leading slash)
@@ -93,6 +100,33 @@ public class YeedarClient implements ClientModInitializer {
         FriendlyTracker.getInstance().refresh();
 
         System.out.println("[Yeedar] Initialized - player tracking mod for EdenMc");
+    }
+
+    /**
+     * Print the "nothing is being uploaded from here" notice, if one is owed.
+     *
+     * <p>The gate is silent everywhere else, so this single line is the only
+     * thing standing between a player on the wrong server and the conclusion
+     * that Yeedar is broken. Waiting out JOIN_NOTICE_DELAY also means the
+     * server entry is long since settled by the time it is read.
+     */
+    private void sendOffEdenNotice(net.minecraft.client.MinecraftClient client) {
+        if (client == null || client.player == null) return;
+
+        if (!OffEdenNotice.shouldNotify(EdenServer.onRemoteServer(),
+                EdenServer.connected(), offEdenNoticeShown)) {
+            return;
+        }
+
+        // Set before sending, so a failure to render cannot turn this into a
+        // line that retries on every join for the rest of the session.
+        offEdenNoticeShown = true;
+
+        client.player.sendMessage(Text.literal(
+                "§6[Yeedar] §fNot uploading from this server.\n"
+                        + "§7Yeedar only reports from §f" + EdenServer.HOST
+                        + "§7 — no sightings, snitches or terrain are "
+                        + "being sent from here."), false);
     }
 
     /** Print the "newer version exists" notice, if one is owed right now. */

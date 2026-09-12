@@ -16,9 +16,11 @@ on who's around when you're out in the field, far from snitch coverage.
 
 > **Note:** Yeedar uploads only while you are connected to `play.edenmc.world`.
 > On any other server, in singleplayer, or on a LAN world it observes and sends
-> nothing — no sightings, no snitches, no terrain. It does this silently, so
-> if you are wondering why nothing is reaching the map, check which server you
-> are on first.
+> nothing — no sightings, no snitches, no terrain.
+>
+> The first time in a session that you join a server that isn't Eden, Yeedar
+> says so once in chat and then stays quiet. Singleplayer and LAN worlds say
+> nothing at all.
 
 ## Requirements
 

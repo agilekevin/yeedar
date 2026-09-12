@@ -50,28 +50,53 @@ a future upload path cannot forget the rule.
 
 ## What the player sees
 
-Nothing. No chat line on joining another server, no refusal message when a
-gated command does nothing. Uploads simply do not happen.
+One line, once per launch, the first time they join a multiplayer server that
+is not Eden:
 
-The gate does log one line to the game log per refusal so the behaviour is
-diagnosable from `latest.log` without being visible in game.
+> **[Yeedar]** Not uploading from this server.
+> Yeedar only reports from play.edenmc.world — no sightings, snitches or
+> terrain are being sent from here.
+
+Everything else stays silent: no refusal message when a gated command does
+nothing, nothing per sighting, and nothing at all in singleplayer or on a LAN
+world, where no one is waiting for their world to reach Eden's map.
+
+**Once per launch, not once per join.** People relog constantly, and a line
+that returns every session is one they stop reading — the same reasoning
+that already governs the update notice. The first non-Eden join of a session
+gets it whether or not the session started on Eden.
+
+It is printed 60 ticks after the join event, reusing the delay the update
+notice already needed: sending straight from the join races the server's own
+join spam and scrolls away unread.
+
+The gate also logs one line to the game log per refusal, so behaviour is
+diagnosable from `latest.log`.
 
 The cost, accepted knowingly: a player who runs `/yeedar launch` on another
-server gets no feedback at all. `/yeedar status` is unchanged and does not
+server still gets no feedback at that moment, and `/yeedar status` does not
 report which server it thinks it is on.
 
 ## Structure
 
-New `com.yeedar.net.EdenServer`, two pieces:
+New `com.yeedar.net.EdenServer`, three pieces:
 
 - `isEdenAddress(String)` — pure, no Minecraft types, unit tested. All the
   parsing lives here: null, blank, port, case, trailing dot, near-misses.
 - `connected()` — the live check. Reads `MinecraftClient.getCurrentServerEntry()`
-  and rejects singleplayer, then defers to `isEdenAddress`.
+  and rejects singleplayer, LAN and realms, then defers to `isEdenAddress`.
+- `onRemoteServer()` — on any multiplayer server, Eden or not. It separates
+  "somewhere uploads could have been expected" from singleplayer and LAN,
+  which is the difference between a useful notice and a nag.
 
-Splitting them is the point: the matching rule is the part that can be wrong
-in an interesting way, and it is the part that can be tested without a running
-game.
+New `com.yeedar.net.OffEdenNotice.shouldNotify(onRemoteServer, onEden,
+alreadyShown)` — the notice rule, also free of Minecraft types, following
+the shape `UpdateNotifier` already set: the predicate is pure and the caller
+owns both the message and the flag.
+
+Splitting the rules from the lookups is the point: they are the parts that can
+be wrong in an interesting way, and the parts that can be tested without a
+running game.
 
 ## Testing
 
@@ -83,4 +108,8 @@ client produces and the near-misses that must not pass:
 - `edenmc.world`, `mc.edenmc.world`, `notplay.edenmc.world`,
   `play.edenmc.world.example.com`, `localhost` — all false
 
-`connected()` needs a running client and is not unit tested.
+`OffEdenNoticeTest` covers the notice rule: a non-Eden server earns it, Eden
+does not, singleplayer and LAN do not, and `alreadyShown` outranks everything.
+
+`connected()` and `onRemoteServer()` need a running client and are not unit
+tested.

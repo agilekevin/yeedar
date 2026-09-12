@@ -57,17 +57,37 @@ public final class EdenServer {
      *
      * <p>False for singleplayer, for a LAN world, for the main menu, and for
      * every other server. Callers treat that as "do not upload" and say
-     * nothing to the player — see the gate's design note.
+     * nothing to the player beyond the one notice on joining — see the gate's
+     * design note.
      */
     public static boolean connected() {
+        ServerInfo entry = remoteEntry();
+        return entry != null && isEdenAddress(entry.address);
+    }
+
+    /**
+     * Is the client on someone else's server at all?
+     *
+     * <p>Distinct from {@link #connected}: this is true on any multiplayer
+     * server, Eden or not. It separates "somewhere uploads could have been
+     * expected" from singleplayer and LAN, where they never would be, which
+     * is the difference between a useful notice and a nag.
+     */
+    public static boolean onRemoteServer() {
+        return remoteEntry() != null;
+    }
+
+    /** The entry for the multiplayer server we are on, or null if we are not
+     *  on one. */
+    private static ServerInfo remoteEntry() {
         MinecraftClient client = MinecraftClient.getInstance();
-        if (client == null) return false;
-        // An integrated server has a server entry left over from whatever the
-        // player last joined, so this has to be asked before the address is.
-        if (client.isInSingleplayer()) return false;
+        if (client == null) return null;
+        // An integrated server keeps the entry for whatever the player last
+        // joined, so this has to be asked before the address is.
+        if (client.isInSingleplayer()) return null;
         ServerInfo entry = client.getCurrentServerEntry();
-        if (entry == null) return false;
-        if (entry.isLocal() || entry.isRealm()) return false;
-        return isEdenAddress(entry.address);
+        if (entry == null) return null;
+        if (entry.isLocal() || entry.isRealm()) return null;
+        return entry;
     }
 }
