@@ -1,6 +1,7 @@
 package com.yeedar.terrain;
 
 import com.yeedar.config.YeedarConfig;
+import com.yeedar.net.EdenServer;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.util.math.ChunkPos;
 import net.minecraft.world.chunk.WorldChunk;
@@ -210,6 +211,11 @@ public final class TerrainCapture {
         }
 
         if (!YeedarConfig.getInstance().isMappingEnabled()) return;
+        // Off Eden, stop at the sampler. Gating only the upload would leave
+        // the sweep reading chunks, the buffer filling with them, and every
+        // flush taking a failure — driving the backoff to its ceiling over
+        // work that was never going to be sent.
+        if (!EdenServer.connected()) return;
 
         // Somewhere we cannot name is somewhere we must not file chunks under.
         // Storing them as "unknown" would poison a layer nobody could identify

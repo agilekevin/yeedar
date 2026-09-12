@@ -14,6 +14,14 @@ on who's around when you're out in the field, far from snitch coverage.
 > see (players within render/entity range). It does not give you wallhacks,
 > X-ray, or any view your client doesn't normally receive.
 
+> **Note:** Yeedar uploads only while you are connected to `play.edenmc.world`.
+> On any other server, in singleplayer, or on a LAN world it observes and sends
+> nothing — no sightings, no snitches, no terrain.
+>
+> Each time you join a server that isn't Eden, Yeedar says so once in chat.
+> Singleplayer and LAN worlds say nothing at all. `/yeedar launch` also tells
+> you why it refused, rather than doing nothing.
+
 ## Requirements
 
 | Requirement | Version |

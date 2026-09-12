@@ -2,6 +2,7 @@ package com.yeedar.launch;
 
 import com.google.gson.Gson;
 import com.yeedar.config.YeedarConfig;
+import com.yeedar.net.EdenServer;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.text.Text;
 
@@ -50,6 +51,14 @@ public final class LaunchClient {
 
     public static void launch(String code, String thing, int x, int z) {
         YeedarConfig config = YeedarConfig.getInstance();
+        if (!EdenServer.connected()) {
+            // The one gated path the player actually typed, so it answers
+            // rather than doing nothing. Same shape as the not-logged-in
+            // line below: what is wrong, then what would make it work.
+            say("§cNot on EdenMC. §7Yeedar only launches on §f"
+                    + EdenServer.HOST + "§7.");
+            return;
+        }
         if (!config.isLoggedIn()) {
             say("§cNot logged in. §7Run §f/yeedar login§7 first.");
             return;

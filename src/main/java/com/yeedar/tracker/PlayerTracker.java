@@ -1,7 +1,8 @@
 package com.yeedar.tracker;
 
-import com.yeedar.config.YeedarConfig;
 import com.yeedar.api.YeetVisClient;
+import com.yeedar.config.YeedarConfig;
+import com.yeedar.net.EdenServer;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.AbstractClientPlayerEntity;
 
@@ -44,6 +45,17 @@ public class PlayerTracker {
 
         if (tickCounter % CHECK_INTERVAL != 0) return;
         if (!YeedarConfig.getInstance().isTrackingEnabled()) return;
+        // Sightings from anywhere else are not ours to file. Checked here
+        // rather than only at the upload so a non-Eden server costs no sweep
+        // at all, and so trackedPlayers does not fill with names that were
+        // never reported — those would report as departures on the way back.
+        if (!EdenServer.connected()) {
+            if (!trackedPlayers.isEmpty()) {
+                trackedPlayers.clear();
+                lastKnownPositions.clear();
+            }
+            return;
+        }
 
         double range = YeedarConfig.getInstance().getDetectionRange();
         double rangeSq = range * range;
