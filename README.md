@@ -18,9 +18,9 @@ on who's around when you're out in the field, far from snitch coverage.
 > On any other server, in singleplayer, or on a LAN world it observes and sends
 > nothing — no sightings, no snitches, no terrain.
 >
-> The first time in a session that you join a server that isn't Eden, Yeedar
-> says so once in chat and then stays quiet. Singleplayer and LAN worlds say
-> nothing at all.
+> Each time you join a server that isn't Eden, Yeedar says so once in chat.
+> Singleplayer and LAN worlds say nothing at all. `/yeedar launch` also tells
+> you why it refused, rather than doing nothing.
 
 ## Requirements
 

@@ -33,10 +33,6 @@ public class YeedarClient implements ClientModInitializer {
     private int joinNoticeCountdown = -1;
     private static final int JOIN_NOTICE_DELAY = 60; // ticks = 3 seconds
 
-    /** Whether this launch has already said Yeedar does not upload here.
-     *  Per launch rather than per join, so relogging does not repeat it. */
-    private boolean offEdenNoticeShown = false;
-
     @Override
     public void onInitializeClient() {
         YeedarConfig.load();
@@ -105,22 +101,18 @@ public class YeedarClient implements ClientModInitializer {
     /**
      * Print the "nothing is being uploaded from here" notice, if one is owed.
      *
-     * <p>The gate is silent everywhere else, so this single line is the only
-     * thing standing between a player on the wrong server and the conclusion
-     * that Yeedar is broken. Waiting out JOIN_NOTICE_DELAY also means the
-     * server entry is long since settled by the time it is read.
+     * <p>Once per join: the countdown that calls this is armed by the join
+     * event and fires exactly once per connection, so nothing here needs to
+     * remember whether it has spoken. Waiting out JOIN_NOTICE_DELAY also
+     * means the server entry is long since settled by the time it is read.
      */
     private void sendOffEdenNotice(net.minecraft.client.MinecraftClient client) {
         if (client == null || client.player == null) return;
 
         if (!OffEdenNotice.shouldNotify(EdenServer.onRemoteServer(),
-                EdenServer.connected(), offEdenNoticeShown)) {
+                EdenServer.connected())) {
             return;
         }
-
-        // Set before sending, so a failure to render cannot turn this into a
-        // line that retries on every join for the rest of the session.
-        offEdenNoticeShown = true;
 
         client.player.sendMessage(Text.literal(
                 "§6[Yeedar] §fNot uploading from this server.\n"

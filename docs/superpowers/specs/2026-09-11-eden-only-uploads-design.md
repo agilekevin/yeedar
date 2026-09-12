@@ -50,32 +50,35 @@ a future upload path cannot forget the rule.
 
 ## What the player sees
 
-One line, once per launch, the first time they join a multiplayer server that
-is not Eden:
+One line each time they join a multiplayer server that is not Eden:
 
 > **[Yeedar]** Not uploading from this server.
 > Yeedar only reports from play.edenmc.world — no sightings, snitches or
 > terrain are being sent from here.
 
-Everything else stays silent: no refusal message when a gated command does
-nothing, nothing per sighting, and nothing at all in singleplayer or on a LAN
-world, where no one is waiting for their world to reach Eden's map.
+`/yeedar launch` answers too, because the player typed it and a command that
+silently does nothing reads as a broken mod:
 
-**Once per launch, not once per join.** People relog constantly, and a line
-that returns every session is one they stop reading — the same reasoning
-that already governs the update notice. The first non-Eden join of a session
-gets it whether or not the session started on Eden.
+> **Not on EdenMC.** Yeedar only launches on play.edenmc.world.
+
+Nothing is said per sighting or per upload, and nothing at all in singleplayer
+or on a LAN world, where no one is waiting for their world to reach Eden's map.
+
+**Once per join.** The notice is armed by the join event and fires a single
+time per connection, so the countdown is the whole of the "once" — no flag
+is kept that could fall out of step with the connection it describes. Rejoin
+and you are told again, which is the point: it is a fact about where you are,
+not an announcement about the session.
 
 It is printed 60 ticks after the join event, reusing the delay the update
 notice already needed: sending straight from the join races the server's own
 join spam and scrolls away unread.
 
-The gate also logs one line to the game log per refusal, so behaviour is
+The upload paths still log a line to the game log per refusal, so behaviour is
 diagnosable from `latest.log`.
 
-The cost, accepted knowingly: a player who runs `/yeedar launch` on another
-server still gets no feedback at that moment, and `/yeedar status` does not
-report which server it thinks it is on.
+The cost, accepted knowingly: `/yeedar status` does not report which server it
+thinks it is on.
 
 ## Structure
 
@@ -89,10 +92,10 @@ New `com.yeedar.net.EdenServer`, three pieces:
   "somewhere uploads could have been expected" from singleplayer and LAN,
   which is the difference between a useful notice and a nag.
 
-New `com.yeedar.net.OffEdenNotice.shouldNotify(onRemoteServer, onEden,
-alreadyShown)` — the notice rule, also free of Minecraft types, following
-the shape `UpdateNotifier` already set: the predicate is pure and the caller
-owns both the message and the flag.
+New `com.yeedar.net.OffEdenNotice.shouldNotify(onRemoteServer, onEden)` — the
+notice rule, also free of Minecraft types, following the shape
+`UpdateNotifier` already set: the predicate is pure and the caller owns the
+message and the timing.
 
 Splitting the rules from the lookups is the point: they are the parts that can
 be wrong in an interesting way, and the parts that can be tested without a
@@ -109,7 +112,8 @@ client produces and the near-misses that must not pass:
   `play.edenmc.world.example.com`, `localhost` — all false
 
 `OffEdenNoticeTest` covers the notice rule: a non-Eden server earns it, Eden
-does not, singleplayer and LAN do not, and `alreadyShown` outranks everything.
+does not, and a local world does not even when its stale server entry reads as
+Eden.
 
 `connected()` and `onRemoteServer()` need a running client and are not unit
 tested.

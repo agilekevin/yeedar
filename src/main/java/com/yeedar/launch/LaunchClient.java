@@ -52,11 +52,11 @@ public final class LaunchClient {
     public static void launch(String code, String thing, int x, int z) {
         YeedarConfig config = YeedarConfig.getInstance();
         if (!EdenServer.connected()) {
-            // Silent by design, like every other gated path. The log line is
-            // the only trace, so that "the command does nothing" is at least
-            // answerable from latest.log.
-            System.out.println("[Yeedar] ignoring launch — not connected to "
-                    + EdenServer.HOST);
+            // The one gated path the player actually typed, so it answers
+            // rather than doing nothing. Same shape as the not-logged-in
+            // line below: what is wrong, then what would make it work.
+            say("§cNot on EdenMC. §7Yeedar only launches on §f"
+                    + EdenServer.HOST + "§7.");
             return;
         }
         if (!config.isLoggedIn()) {

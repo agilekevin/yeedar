@@ -10,15 +10,15 @@ class OffEdenNoticeTest {
 
     @Test
     @DisplayName("a non-Eden server earns the notice")
-    void otherServerIsToldOnce() {
-        assertTrue(OffEdenNotice.shouldNotify(true, false, false));
+    void otherServerIsTold() {
+        assertTrue(OffEdenNotice.shouldNotify(true, false));
     }
 
     @Test
     @DisplayName("Eden itself says nothing")
     void edenIsQuiet() {
         // The notice explains an absence. On Eden there is no absence.
-        assertFalse(OffEdenNotice.shouldNotify(true, true, false));
+        assertFalse(OffEdenNotice.shouldNotify(true, true));
     }
 
     @Test
@@ -26,21 +26,14 @@ class OffEdenNoticeTest {
     void localWorldsAreQuiet() {
         // Nobody loading their own world is waiting for it to reach Eden's
         // map, so the line would be pure nag on every test world.
-        assertFalse(OffEdenNotice.shouldNotify(false, false, false));
+        assertFalse(OffEdenNotice.shouldNotify(false, false));
     }
 
     @Test
-    @DisplayName("it does not repeat once shown")
-    void onlyOncePerLaunch() {
-        // Same reasoning as the update notice: a line that returns every
-        // rejoin is a line people stop reading, which fails its only job.
-        assertFalse(OffEdenNotice.shouldNotify(true, false, true));
-    }
-
-    @Test
-    @DisplayName("being shown already outranks every other reason")
-    void shownWinsOverEverything() {
-        assertFalse(OffEdenNotice.shouldNotify(true, true, true));
-        assertFalse(OffEdenNotice.shouldNotify(false, false, true));
+    @DisplayName("a local world is quiet even if it somehow reads as Eden")
+    void localOutranksTheAddress() {
+        // A LAN world's entry is whatever the host last joined, so this
+        // combination is reachable rather than hypothetical.
+        assertFalse(OffEdenNotice.shouldNotify(false, true));
     }
 }
