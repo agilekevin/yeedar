@@ -2,9 +2,9 @@ package com.yeedar.tracker;
 
 import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
+import com.yeedar.api.AuthedRequest;
 import com.yeedar.config.YeedarConfig;
 
-import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -57,8 +57,16 @@ public class FriendlyTracker {
         String baseUrl = config.getApiBaseUrl();
         if (baseUrl == null || baseUrl.isEmpty()) return;
 
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(baseUrl + "/friendlies"))
+        // GET /friendlies is behind verify_dashboard_or_api_secret server-side.
+        // This call used to send no credentials at all and had been silently
+        // 401ing ever since that gate was added: a 401 is a perfectly good HTTP
+        // exchange, so it lands in thenAccept, fails the == 200 test and falls
+        // through doing nothing — no log, no retry, no sign anything is wrong.
+        // The visible symptom was every ally reading as unknown.
+        String token = config.getToken();
+        if (token == null || token.isEmpty()) return;   // not logged in yet
+
+        HttpRequest request = AuthedRequest.to(baseUrl + "/friendlies", token)
                 .GET()
                 .build();
 
@@ -74,6 +82,14 @@ public class FriendlyTracker {
                         friendlyPlayers = Collections.unmodifiableSet(lower);
                         loaded = true;
                         System.out.println("[Yeedar] Refreshed friendly list: " + lower.size() + " players");
+                    } else {
+                        // Say so. This branch staying silent is the only reason
+                        // the missing credentials went unnoticed for so long,
+                        // and an unloaded list now suppresses logout reporting
+                        // entirely — a failure worth one line of stderr.
+                        System.err.println("[Yeedar] Friendly list refresh returned "
+                                + response.statusCode() + "; keeping "
+                                + (loaded ? "the previous list" : "an unloaded list"));
                     }
                 })
                 .exceptionally(throwable -> {
