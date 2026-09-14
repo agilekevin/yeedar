@@ -44,9 +44,18 @@ public final class LogoutTracker {
      * a test rather than buried in a loop. Getting this wrong publishes an
      * ally's exact position, and {@link LogoutDetector} cannot catch it —
      * filtering is deliberately the caller's job.
+     *
+     * <p>{@code friendlyListLoaded} exists because {@link FriendlyTracker}
+     * cannot distinguish "confirmed not friendly" from "hasn't heard yet": on a
+     * cold launch, or after any failed refresh, {@link FriendlyTracker#isFriendly}
+     * reads false for everyone, allies included. Until the list has loaded at
+     * least once, "not friendly" is a guess rather than a fact, and guessing
+     * wrong here publishes an ally's exact position — so an unloaded list makes
+     * nothing reportable, regardless of the other three conditions.
      */
-    static boolean isReportable(boolean inRange, boolean ignored, boolean friendly) {
-        return inRange && !ignored && !friendly;
+    static boolean isReportable(boolean inRange, boolean ignored,
+                                 boolean friendly, boolean friendlyListLoaded) {
+        return inRange && !ignored && !friendly && friendlyListLoaded;
     }
 
     public void tick(MinecraftClient client) {
@@ -88,6 +97,7 @@ public final class LogoutTracker {
 
         double range = config.getDetectionRange();
         double rangeSq = range * range;
+        FriendlyTracker friendlyTracker = FriendlyTracker.getInstance();
 
         List<LogoutDetector.Sighting> nearby = new ArrayList<>();
         for (AbstractClientPlayerEntity player : client.world.getPlayers()) {
@@ -96,8 +106,9 @@ public final class LogoutTracker {
             String name = player.getName().getString();
             boolean inRange = client.player.squaredDistanceTo(player) <= rangeSq;
             boolean ignored = config.isIgnored(name);
-            boolean friendly = FriendlyTracker.getInstance().isFriendly(name);
-            if (!isReportable(inRange, ignored, friendly)) continue;
+            boolean friendly = friendlyTracker.isFriendly(name);
+            boolean friendlyListLoaded = friendlyTracker.isLoaded();
+            if (!isReportable(inRange, ignored, friendly, friendlyListLoaded)) continue;
 
             nearby.add(new LogoutDetector.Sighting(
                     player.getUuid(), name, player.getX(), player.getY(), player.getZ()));

@@ -46,6 +46,9 @@ public class YeetVisClient {
     private static final int MAX_MESSAGES_PER_WINDOW = 5;
     private static final long WINDOW_MS = 10_000;
 
+    /** Where a rejected client can get a build the server will accept. */
+    private static final String RELEASES_URL = "https://github.com/agilekevin/yeedar/releases";
+
     /**
      * Set once the API has said this build is too old to accept.
      *
@@ -106,6 +109,13 @@ public class YeetVisClient {
 
         HTTP_CLIENT.sendAsync(request, HttpResponse.BodyHandlers.ofString())
                 .thenAccept(response -> {
+                    // This is the path a real cutoff is actually caught on:
+                    // sightings fire every second while logouts are rare, so
+                    // the first 426 of a rejection almost always lands here
+                    // first. Without this call the client would keep retrying
+                    // on its normal cadence forever, and the player would never
+                    // learn why.
+                    noteStatus(response.statusCode());
                     if (response.statusCode() != 200) {
                         System.err.println("[Yeedar] API returned " + response.statusCode() + ": " + response.body());
                     }
@@ -348,6 +358,10 @@ public class YeetVisClient {
         return HTTP_CLIENT.sendAsync(request, HttpResponse.BodyHandlers.ofString())
                 .thenApply(response -> {
                     int status = response.statusCode();
+                    // Terrain uploads are infrequent compared to sightings, but
+                    // still a path a real cutoff can be discovered on, so it
+                    // gets the same treatment as every other upload path.
+                    noteStatus(status);
                     if (status == 200) return true;
                     // 429 is the server's hourly cap and is expected under heavy
                     // exploration; say so plainly rather than as an error.
@@ -491,7 +505,7 @@ public class YeetVisClient {
         if (!versionRejected.compareAndSet(false, true)) return;
         chat("§cThis version is no longer accepted by YeetVis. "
                 + "§fNothing more will be uploaded this session — "
-                + "update Yeedar and restart to resume.");
+                + "update Yeedar and restart to resume: §b" + RELEASES_URL);
     }
 
     /** Forget a rejection, so a fresh connection re-checks. */
