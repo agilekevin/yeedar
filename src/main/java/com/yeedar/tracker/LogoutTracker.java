@@ -60,10 +60,20 @@ public final class LogoutTracker {
         }
 
         // Dimension switch or reconnect. Both empty and refill the tab list, and
-        // a diff across one would report everybody as having logged out.
+        // a diff across one would report everybody as having logged out. The
+        // reset makes the next scan a fresh baseline, and returning here — like
+        // the other three reset paths in this method — keeps that guarantee
+        // local to tick() instead of resting on how LogoutDetector happens to
+        // treat a null baseline today. Falling through to build nearby/online
+        // and scan() in the same tick is currently harmless, but only because
+        // of internals owned by a different class; a later edit there could
+        // silently remove the property this path would otherwise depend on,
+        // and the failure mode is publishing everyone's coordinates after a
+        // nether portal.
         if (lastWorld != client.world) {
             detector.reset();
             lastWorld = client.world;
+            return;
         }
 
         if (tickCounter % CHECK_INTERVAL != 0) return;

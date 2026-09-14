@@ -24,6 +24,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class YeetVisClient {
@@ -52,8 +53,17 @@ public class YeetVisClient {
      * each one fail on its own: the server has already decided, and retrying
      * only produces noise. Cleared on disconnect, so relaunching after an
      * update starts clean without restarting the game.
+     *
+     * <p>{@code AtomicBoolean} rather than a plain {@code volatile boolean}
+     * because a version cutoff does not fail one upload at a time — the server
+     * starts refusing everything at once, so near-simultaneous 426s landing on
+     * different HttpClient worker threads are the normal case here, not a
+     * freak race. A bare volatile gives visibility but not atomicity: two
+     * threads could both read {@code false} before either writes {@code true},
+     * which would print the "no longer accepted" line twice and break the
+     * "spoken exactly once" contract this field exists to keep.
      */
-    private static volatile boolean versionRejected = false;
+    private static final AtomicBoolean versionRejected = new AtomicBoolean(false);
 
     public static void sendPlayerEvent(String playerName, double x, double y, double z, boolean entered, boolean friendly) {
         YeedarConfig config = YeedarConfig.getInstance();
@@ -62,7 +72,7 @@ public class YeetVisClient {
 
         if (baseUrl == null || baseUrl.isEmpty()) return;
         if (token == null || token.isEmpty()) return;
-        if (versionRejected) return;
+        if (versionRejected.get()) return;
         // Backstop. PlayerTracker already stops sweeping off Eden; this is
         // here so a future caller cannot reintroduce the leak by accident.
         if (!EdenServer.connected()) return;
@@ -125,7 +135,7 @@ public class YeetVisClient {
 
         if (baseUrl == null || baseUrl.isEmpty()) return;
         if (token == null || token.isEmpty()) return;
-        if (versionRejected) return;
+        if (versionRejected.get()) return;
         // Backstop, matching sendPlayerEvent: nothing is reported off Eden.
         if (!EdenServer.connected()) return;
 
@@ -472,8 +482,13 @@ public class YeetVisClient {
      * its once-per-version rule.
      */
     private static void noteStatus(int statusCode) {
-        if (statusCode != 426 || versionRejected) return;
-        versionRejected = true;
+        if (statusCode != 426) return;
+        // compareAndSet, not a read-then-write: a cutoff refuses every
+        // in-flight request at once, so two uploads can each observe a 426 on
+        // their own HttpClient worker thread within microseconds of each
+        // other. Only the thread that actually flips false -> true gets to
+        // speak; the loser sees the CAS fail and returns quietly.
+        if (!versionRejected.compareAndSet(false, true)) return;
         chat("§cThis version is no longer accepted by YeetVis. "
                 + "§fNothing more will be uploaded this session — "
                 + "update Yeedar and restart to resume.");
@@ -481,6 +496,6 @@ public class YeetVisClient {
 
     /** Forget a rejection, so a fresh connection re-checks. */
     public static void clearVersionRejection() {
-        versionRejected = false;
+        versionRejected.set(false);
     }
 }
