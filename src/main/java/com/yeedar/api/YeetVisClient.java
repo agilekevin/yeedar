@@ -4,7 +4,6 @@ import com.google.gson.Gson;
 import com.yeedar.config.YeedarConfig;
 import com.yeedar.net.EdenServer;
 
-import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -79,10 +78,8 @@ public class YeetVisClient {
 
         String json = GSON.toJson(payload);
 
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(baseUrl + "/events"))
+        HttpRequest request = AuthedRequest.to(baseUrl + "/events", token)
                 .header("Content-Type", "application/json")
-                .header("X-Yeedar-Token", token)
                 .POST(HttpRequest.BodyPublishers.ofString(json))
                 .build();
 
@@ -113,9 +110,7 @@ public class YeetVisClient {
         if (unconfiguredReason() != null) {
             return CompletableFuture.completedFuture(List.of());
         }
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(config.getApiBaseUrl() + "/jalist/defaults"))
-                .header("X-Yeedar-Token", config.getToken())
+        HttpRequest request = AuthedRequest.to(config.getApiBaseUrl() + "/jalist/defaults", config.getToken())
                 .GET()
                 .build();
         return HTTP_CLIENT.sendAsync(request, HttpResponse.BodyHandlers.ofString())
@@ -197,10 +192,8 @@ public class YeetVisClient {
         payload.put("scanned_at", Instant.now().toString());
         payload.put("uploaded_by", config.getUsername());
 
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(baseUrl + "/snitches/jalist"))
+        HttpRequest request = AuthedRequest.to(baseUrl + "/snitches/jalist", token)
                 .header("Content-Type", "application/json")
-                .header("X-Yeedar-Token", token)
                 .POST(HttpRequest.BodyPublishers.ofString(GSON.toJson(payload)))
                 .build();
 
@@ -254,10 +247,8 @@ public class YeetVisClient {
         payload.put("world", world);
         payload.put("chunks", rows);
 
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(config.getApiBaseUrl() + "/terrain"))
+        HttpRequest request = AuthedRequest.to(config.getApiBaseUrl() + "/terrain", config.getToken())
                 .header("Content-Type", "application/json")
-                .header("X-Yeedar-Token", config.getToken())
                 .POST(HttpRequest.BodyPublishers.ofString(GSON.toJson(payload)))
                 .build();
 
