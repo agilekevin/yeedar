@@ -123,6 +123,22 @@ class LogoutDetectorTest {
     }
 
     @Test
+    @DisplayName("a player seen before the tab list lists them is never reported")
+    void nearbyButNeverOnlineIsNeverReported() {
+        // The tab list can lag entity spawn, so a player can be loaded and in
+        // range before the server has listed them. The diff only ever walks
+        // UUIDs that were previously ONLINE, so this sighting can never become
+        // a logout on its own. Dropping a report is the right failure here -
+        // the alternative is publishing a position for somebody whose presence
+        // we never actually confirmed.
+        LogoutDetector detector = new LogoutDetector();
+        // Baseline: Alice is loaded nearby, but not yet in the tab list.
+        assertTrue(detector.scan(List.of(alice(10, 20, 30)), Set.of()).isEmpty());
+        // She is gone next scan, still never having been listed.
+        assertTrue(detector.scan(List.of(), Set.of()).isEmpty());
+    }
+
+    @Test
     @DisplayName("the position reported is the one from the tick before they vanished")
     void positionComesFromThePreviousTick() {
         // By the time the tab list drops a player their entity is already gone,
