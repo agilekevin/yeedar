@@ -45,6 +45,16 @@ public class YeetVisClient {
     private static final int MAX_MESSAGES_PER_WINDOW = 5;
     private static final long WINDOW_MS = 10_000;
 
+    /**
+     * Set once the API has said this build is too old to accept.
+     *
+     * <p>Suppresses every further upload for the session rather than letting
+     * each one fail on its own: the server has already decided, and retrying
+     * only produces noise. Cleared on disconnect, so relaunching after an
+     * update starts clean without restarting the game.
+     */
+    private static volatile boolean versionRejected = false;
+
     public static void sendPlayerEvent(String playerName, double x, double y, double z, boolean entered, boolean friendly) {
         YeedarConfig config = YeedarConfig.getInstance();
         String baseUrl = config.getApiBaseUrl();
@@ -52,6 +62,7 @@ public class YeetVisClient {
 
         if (baseUrl == null || baseUrl.isEmpty()) return;
         if (token == null || token.isEmpty()) return;
+        if (versionRejected) return;
         // Backstop. PlayerTracker already stops sweeping off Eden; this is
         // here so a future caller cannot reintroduce the leak by accident.
         if (!EdenServer.connected()) return;
@@ -91,6 +102,78 @@ public class YeetVisClient {
                 })
                 .exceptionally(throwable -> {
                     System.err.println("[Yeedar] API error: " + throwable.getMessage());
+                    return null;
+                });
+    }
+
+    /**
+     * Report that a player logged out, at the position they logged out from.
+     *
+     * <p>The one call in Yeedar that publishes somebody else's precise
+     * coordinates. Everything else — {@link #sendPlayerEvent} included —
+     * reports the OBSERVER's position, so that watching somebody never reveals
+     * where they are. A logout is the agreed exception: the player is gone, the
+     * spot is what matters, and Combat Radar already tells its own user the
+     * same thing locally.
+     *
+     * <p>Callers must have filtered friendlies out already; LogoutTracker does.
+     */
+    public static void sendLogoutEvent(String playerName, double x, double y, double z) {
+        YeedarConfig config = YeedarConfig.getInstance();
+        String baseUrl = config.getApiBaseUrl();
+        String token = config.getToken();
+
+        if (baseUrl == null || baseUrl.isEmpty()) return;
+        if (token == null || token.isEmpty()) return;
+        if (versionRejected) return;
+        // Backstop, matching sendPlayerEvent: nothing is reported off Eden.
+        if (!EdenServer.connected()) return;
+
+        if (!checkRateLimit()) {
+            // Louder than the sighting path's stderr line, and deliberately so.
+            // A dropped sighting is replaced by the next sweep a second later;
+            // a dropped logout is gone for good, because the player is. The cap
+            // is 5 per 10s, which a busy area can genuinely exhaust.
+            chat("§6[Yeedar] §fRate limited — a logout report for §f"
+                    + playerName + "§f was dropped.");
+            return;
+        }
+
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("player", playerName);
+        payload.put("x", (int) x);
+        payload.put("y", (int) y);
+        payload.put("z", (int) z);
+        payload.put("world", Dimensions.of(MinecraftClient.getInstance().world));
+        // Null, and load-bearing. The API upserts a snitch for any event that
+        // carries BOTH a snitch_name and coordinates, so a name here would plant
+        // a phantom snitch at the player's logout spot and feed it into the
+        // snitch layer and the coverage maths.
+        payload.put("snitch_name", null);
+        payload.put("group", "yeedar-unknown");
+        payload.put("action", "logout");
+        String reporter = config.getUsername().isEmpty() ? "unknown" : config.getUsername();
+        payload.put("raw", String.format("[Yeedar/%s] %s logged out at %.0f, %.0f, %.0f",
+                reporter, playerName, x, y, z));
+
+        String json = GSON.toJson(payload);
+
+        HttpRequest request = AuthedRequest.to(baseUrl + "/events", token)
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(json))
+                .build();
+
+        HTTP_CLIENT.sendAsync(request, HttpResponse.BodyHandlers.ofString())
+                .thenAccept(response -> {
+                    noteStatus(response.statusCode());
+                    if (response.statusCode() != 200) {
+                        System.err.println("[Yeedar] Logout report returned "
+                                + response.statusCode() + ": " + response.body());
+                    }
+                })
+                .exceptionally(throwable -> {
+                    System.err.println("[Yeedar] Logout report error: "
+                            + throwable.getMessage());
                     return null;
                 });
     }
@@ -314,6 +397,13 @@ public class YeetVisClient {
                     if (response.statusCode() == 200) {
                         uploaded.addAndGet(count);
                         System.out.println("[Yeedar] Uploaded " + count + " snitches: " + response.body());
+                    } else if (response.statusCode() == 426) {
+                        // A permanent answer, not a blip. The backoff ladder
+                        // would spend 2s, 4s and 8s re-asking a question the
+                        // server has already settled, then report it as an
+                        // upload failure rather than as what it is.
+                        noteStatus(response.statusCode());
+                        failed.addAndGet(count);
                     } else {
                         retryOrGiveUp(request, count, attempt,
                                 "HTTP " + response.statusCode() + " " + response.body());
@@ -372,5 +462,25 @@ public class YeetVisClient {
         }
         recentSendTimestamps.addLast(now);
         return true;
+    }
+
+    /**
+     * Notice a 426 and shut uploads down for the session.
+     *
+     * <p>Spoken exactly once. A line that reappears every second is a line
+     * people stop reading, which is the same reasoning UpdateNotifier uses for
+     * its once-per-version rule.
+     */
+    private static void noteStatus(int statusCode) {
+        if (statusCode != 426 || versionRejected) return;
+        versionRejected = true;
+        chat("§c[Yeedar] This version is no longer accepted by YeetVis. "
+                + "§fNothing more will be uploaded this session — "
+                + "update Yeedar and restart to resume.");
+    }
+
+    /** Forget a rejection, so a fresh connection re-checks. */
+    public static void clearVersionRejection() {
+        versionRejected = false;
     }
 }
