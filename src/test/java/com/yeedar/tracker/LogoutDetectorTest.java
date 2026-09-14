@@ -152,4 +152,67 @@ class LogoutDetectorTest {
         assertEquals(1, out.size());
         assertEquals(2, out.get(0).x(), "the last position actually observed");
     }
+
+    @Test
+    @DisplayName("a tab entry that flickers is reported once, not once per drop")
+    void flickerIsReportedOnce() {
+        // Observed on EdenMC: a player's tab entry was rewritten rather than
+        // removed, so it dropped and reappeared repeatedly with the online
+        // total unchanged, and every drop read as a fresh logout. One real
+        // disconnect produced four identical reports at the same block.
+        LogoutDetector detector = primed(Set.of(ALICE), List.of(alice(10, 20, 30)));
+
+        assertEquals(1, detector.scan(List.of(alice(10, 20, 30)), Set.of()).size(),
+                "the first drop is the real one and is reported");
+        assertTrue(detector.scan(List.of(alice(10, 20, 30)), Set.of(ALICE)).isEmpty());
+        assertTrue(detector.scan(List.of(alice(10, 20, 30)), Set.of()).isEmpty(),
+                "the second drop is the same disconnect and must not report again");
+        assertTrue(detector.scan(List.of(alice(10, 20, 30)), Set.of(ALICE)).isEmpty());
+        assertTrue(detector.scan(List.of(alice(10, 20, 30)), Set.of()).isEmpty());
+    }
+
+    @Test
+    @DisplayName("a genuine logout well after the first is reported again")
+    void suppressionExpires() {
+        // The window collapses one disconnect's flicker, not a whole session.
+        LogoutDetector detector = primed(Set.of(ALICE), List.of(alice(1, 1, 1)));
+        assertEquals(1, detector.scan(List.of(alice(1, 1, 1)), Set.of()).size());
+
+        for (int i = 0; i < 20; i++) {
+            detector.scan(List.of(alice(5, 5, 5)), Set.of(ALICE));
+        }
+
+        List<LogoutDetector.Logout> out = detector.scan(List.of(alice(5, 5, 5)), Set.of());
+        assertEquals(1, out.size(), "a later, separate logout still reports");
+        assertEquals(5, out.get(0).x());
+    }
+
+    @Test
+    @DisplayName("suppressing one player does not suppress another")
+    void suppressionIsPerPlayer() {
+        LogoutDetector.Sighting bob = new LogoutDetector.Sighting(BOB, "Bob", 4, 5, 6);
+        LogoutDetector detector = primed(Set.of(ALICE, BOB), List.of(alice(1, 2, 3), bob));
+
+        assertEquals(1, detector.scan(List.of(alice(1, 2, 3), bob), Set.of(BOB)).size(),
+                "Alice dropped");
+
+        List<LogoutDetector.Logout> out =
+                detector.scan(List.of(alice(1, 2, 3), bob), Set.of());
+        assertEquals(1, out.size(), "Bob dropping is his own logout, not Alice's repeat");
+        assertEquals("Bob", out.get(0).name());
+    }
+
+    @Test
+    @DisplayName("reset clears suppression, so the next real logout is not swallowed")
+    void resetClearsSuppression() {
+        LogoutDetector detector = primed(Set.of(ALICE), List.of(alice(1, 1, 1)));
+        assertEquals(1, detector.scan(List.of(alice(1, 1, 1)), Set.of()).size());
+
+        detector.reset();
+
+        assertTrue(detector.scan(List.of(alice(7, 7, 7)), Set.of(ALICE)).isEmpty(),
+                "re-baseline");
+        assertEquals(1, detector.scan(List.of(alice(7, 7, 7)), Set.of()).size(),
+                "the first logout after a reset is reported");
+    }
 }

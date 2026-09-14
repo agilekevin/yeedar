@@ -64,9 +64,39 @@ public final class LogoutDetector {
      * <p>Called on world change, on disconnect, and whenever the client stops
      * being somewhere we report from.
      */
+    /**
+     * Scans to ignore a repeat logout for the same player.
+     *
+     * <p>Measured in scans rather than seconds so this class keeps no clock and
+     * stays testable as pure logic; the caller ticks it once a second, so this
+     * is roughly fifteen seconds.
+     *
+     * <p>Sized from what was actually observed on EdenMC: a player's tab-list
+     * entry gets rewritten rather than removed — dropping and reappearing with
+     * the online total unchanged — and every drop looked like a fresh logout.
+     * Repeats came 3 and 8 seconds apart, so the window needs real margin over
+     * that. The cost is that somebody who genuinely logs out, back in, and out
+     * again inside fifteen seconds is reported once; that is rare, and one
+     * report of a spot they are standing at anyway loses nothing.
+     */
+    private static final int REPEAT_SUPPRESSION_SCANS = 15;
+
+    /**
+     * Scans remaining before each player may be reported again.
+     *
+     * <p>Keyed by UUID rather than name: a rename between the two halves of a
+     * flicker would otherwise slip past the suppression entirely.
+     */
+    private final Map<UUID, Integer> suppressedFor = new HashMap<>();
+
     public void reset() {
         previousNearby = new HashMap<>();
         previousOnline = null;
+        // Suppression goes too. It exists to collapse one disconnect's worth of
+        // flicker, and a reset means the next scan is a fresh baseline that
+        // cannot report anything anyway — carrying stale counters across a
+        // reconnect would only suppress the first real logout afterwards.
+        suppressedFor.clear();
     }
 
     /**
@@ -82,15 +112,26 @@ public final class LogoutDetector {
     public List<Logout> scan(Collection<Sighting> nearbyNow, Set<UUID> onlineNow) {
         List<Logout> logouts = new ArrayList<>();
 
+        // Age the suppression window first, so a count set on the scan that
+        // reported someone covers the scans AFTER it rather than including it.
+        suppressedFor.entrySet().removeIf(e -> {
+            e.setValue(e.getValue() - 1);
+            return e.getValue() <= 0;
+        });
+
         if (previousOnline != null) {
             for (UUID id : previousOnline) {
                 if (onlineNow.contains(id)) continue;
                 // Gone from the tab list. Report only if we were watching them
                 // when it happened.
                 Sighting last = previousNearby.get(id);
-                if (last != null) {
-                    logouts.add(new Logout(last.name(), last.x(), last.y(), last.z()));
-                }
+                if (last == null) continue;
+                // ...and only if we have not just reported them. A tab entry
+                // that is rewritten rather than removed leaves and returns
+                // repeatedly, and each departure reads here as a fresh logout.
+                if (suppressedFor.containsKey(id)) continue;
+                suppressedFor.put(id, REPEAT_SUPPRESSION_SCANS);
+                logouts.add(new Logout(last.name(), last.x(), last.y(), last.z()));
             }
         }
 
