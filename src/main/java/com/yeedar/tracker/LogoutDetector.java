@@ -27,6 +27,14 @@ import java.util.UUID;
  *
  * <p>Free of Minecraft types so the rule can be tested on its own. The caller
  * owns reading the world and sending the result; this owns the decision.
+ *
+ * <p>Not thread-safe. {@link #scan} mutates {@link #previousNearby} and
+ * {@link #previousOnline} with no synchronisation whatsoever, so it must be
+ * driven from a single thread — the client tick thread. {@link
+ * com.yeedar.tracker.FriendlyTracker} needed a {@code volatile} field for
+ * exactly this reason, because an HTTP callback thread reached into it; the
+ * caller this class is built for also does async HTTP, so the same mistake is
+ * one careless wiring away. Do not call {@code scan()} from a callback.
  */
 public final class LogoutDetector {
 
