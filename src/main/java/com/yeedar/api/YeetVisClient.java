@@ -87,9 +87,9 @@ public class YeetVisClient {
 
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("player", playerName);
-        payload.put("x", (int) x);
-        payload.put("y", (int) y);
-        payload.put("z", (int) z);
+        payload.put("x", Coords.block(x));
+        payload.put("y", Coords.block(y));
+        payload.put("z", Coords.block(z));
         // The dimension actually observed in. This was the literal "overworld"
         // for every sighting Yeedar ever sent, which on a 1:1 server put Nether
         // sightings on top of the overworld rather than somewhere obviously odd.
@@ -161,9 +161,9 @@ public class YeetVisClient {
 
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("player", playerName);
-        payload.put("x", (int) x);
-        payload.put("y", (int) y);
-        payload.put("z", (int) z);
+        payload.put("x", Coords.block(x));
+        payload.put("y", Coords.block(y));
+        payload.put("z", Coords.block(z));
         payload.put("world", Dimensions.of(MinecraftClient.getInstance().world));
         // Null, and load-bearing. The API upserts a snitch for any event that
         // carries BOTH a snitch_name and coordinates, so a name here would plant
