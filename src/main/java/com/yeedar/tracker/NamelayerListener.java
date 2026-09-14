@@ -1,11 +1,11 @@
 package com.yeedar.tracker;
 
 import com.google.gson.Gson;
+import com.yeedar.api.AuthedRequest;
 import com.yeedar.config.YeedarConfig;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.text.Text;
 
-import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -122,10 +122,8 @@ public class NamelayerListener {
 
         String json = GSON.toJson(Map.of("group", group, "player", player));
 
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(baseUrl + "/friendlies/member"))
+        HttpRequest request = AuthedRequest.to(baseUrl + "/friendlies/member", token)
                 .header("Content-Type", "application/json")
-                .header("X-Yeedar-Token", token)
                 .POST(HttpRequest.BodyPublishers.ofString(json))
                 .build();
 
@@ -150,10 +148,8 @@ public class NamelayerListener {
 
         String json = GSON.toJson(Map.of("group", group, "members", members));
 
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(baseUrl + "/friendlies"))
+        HttpRequest request = AuthedRequest.to(baseUrl + "/friendlies", token)
                 .header("Content-Type", "application/json")
-                .header("X-Yeedar-Token", token)
                 .POST(HttpRequest.BodyPublishers.ofString(json))
                 .build();
 

@@ -4,7 +4,6 @@ import com.google.gson.Gson;
 import com.yeedar.config.YeedarConfig;
 import com.yeedar.net.EdenServer;
 
-import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -25,6 +24,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class YeetVisClient {
@@ -46,6 +46,28 @@ public class YeetVisClient {
     private static final int MAX_MESSAGES_PER_WINDOW = 5;
     private static final long WINDOW_MS = 10_000;
 
+    /** Where a rejected client can get a build the server will accept. */
+    private static final String RELEASES_URL = "https://github.com/agilekevin/yeedar/releases";
+
+    /**
+     * Set once the API has said this build is too old to accept.
+     *
+     * <p>Suppresses every further upload for the session rather than letting
+     * each one fail on its own: the server has already decided, and retrying
+     * only produces noise. Cleared on disconnect, so relaunching after an
+     * update starts clean without restarting the game.
+     *
+     * <p>{@code AtomicBoolean} rather than a plain {@code volatile boolean}
+     * because a version cutoff does not fail one upload at a time — the server
+     * starts refusing everything at once, so near-simultaneous 426s landing on
+     * different HttpClient worker threads are the normal case here, not a
+     * freak race. A bare volatile gives visibility but not atomicity: two
+     * threads could both read {@code false} before either writes {@code true},
+     * which would print the "no longer accepted" line twice and break the
+     * "spoken exactly once" contract this field exists to keep.
+     */
+    private static final AtomicBoolean versionRejected = new AtomicBoolean(false);
+
     public static void sendPlayerEvent(String playerName, double x, double y, double z, boolean entered, boolean friendly) {
         YeedarConfig config = YeedarConfig.getInstance();
         String baseUrl = config.getApiBaseUrl();
@@ -53,6 +75,7 @@ public class YeetVisClient {
 
         if (baseUrl == null || baseUrl.isEmpty()) return;
         if (token == null || token.isEmpty()) return;
+        if (versionRejected.get()) return;
         // Backstop. PlayerTracker already stops sweeping off Eden; this is
         // here so a future caller cannot reintroduce the leak by accident.
         if (!EdenServer.connected()) return;
@@ -79,21 +102,98 @@ public class YeetVisClient {
 
         String json = GSON.toJson(payload);
 
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(baseUrl + "/events"))
+        HttpRequest request = AuthedRequest.to(baseUrl + "/events", token)
                 .header("Content-Type", "application/json")
-                .header("X-Yeedar-Token", token)
                 .POST(HttpRequest.BodyPublishers.ofString(json))
                 .build();
 
         HTTP_CLIENT.sendAsync(request, HttpResponse.BodyHandlers.ofString())
                 .thenAccept(response -> {
+                    // This is the path a real cutoff is actually caught on:
+                    // sightings fire every second while logouts are rare, so
+                    // the first 426 of a rejection almost always lands here
+                    // first. Without this call the client would keep retrying
+                    // on its normal cadence forever, and the player would never
+                    // learn why.
+                    noteStatus(response.statusCode());
                     if (response.statusCode() != 200) {
                         System.err.println("[Yeedar] API returned " + response.statusCode() + ": " + response.body());
                     }
                 })
                 .exceptionally(throwable -> {
                     System.err.println("[Yeedar] API error: " + throwable.getMessage());
+                    return null;
+                });
+    }
+
+    /**
+     * Report that a player logged out, at the position they logged out from.
+     *
+     * <p>The one call in Yeedar that publishes somebody else's precise
+     * coordinates. Everything else — {@link #sendPlayerEvent} included —
+     * reports the OBSERVER's position, so that watching somebody never reveals
+     * where they are. A logout is the agreed exception: the player is gone, the
+     * spot is what matters, and Combat Radar already tells its own user the
+     * same thing locally.
+     *
+     * <p>Callers must have filtered friendlies out already; LogoutTracker does.
+     */
+    public static void sendLogoutEvent(String playerName, double x, double y, double z) {
+        YeedarConfig config = YeedarConfig.getInstance();
+        String baseUrl = config.getApiBaseUrl();
+        String token = config.getToken();
+
+        if (baseUrl == null || baseUrl.isEmpty()) return;
+        if (token == null || token.isEmpty()) return;
+        if (versionRejected.get()) return;
+        // Backstop, matching sendPlayerEvent: nothing is reported off Eden.
+        if (!EdenServer.connected()) return;
+
+        if (!checkRateLimit()) {
+            // Louder than the sighting path's stderr line, and deliberately so.
+            // A dropped sighting is replaced by the next sweep a second later;
+            // a dropped logout is gone for good, because the player is. The cap
+            // is 5 per 10s, which a busy area can genuinely exhaust.
+            chat("§6Rate limited — a logout report for §f"
+                    + playerName + "§6 was dropped.");
+            return;
+        }
+
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("player", playerName);
+        payload.put("x", (int) x);
+        payload.put("y", (int) y);
+        payload.put("z", (int) z);
+        payload.put("world", Dimensions.of(MinecraftClient.getInstance().world));
+        // Null, and load-bearing. The API upserts a snitch for any event that
+        // carries BOTH a snitch_name and coordinates, so a name here would plant
+        // a phantom snitch at the player's logout spot and feed it into the
+        // snitch layer and the coverage maths.
+        payload.put("snitch_name", null);
+        payload.put("group", "yeedar-unknown");
+        payload.put("action", "logout");
+        String reporter = config.getUsername().isEmpty() ? "unknown" : config.getUsername();
+        payload.put("raw", String.format("[Yeedar/%s] %s logged out at %.0f, %.0f, %.0f",
+                reporter, playerName, x, y, z));
+
+        String json = GSON.toJson(payload);
+
+        HttpRequest request = AuthedRequest.to(baseUrl + "/events", token)
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(json))
+                .build();
+
+        HTTP_CLIENT.sendAsync(request, HttpResponse.BodyHandlers.ofString())
+                .thenAccept(response -> {
+                    noteStatus(response.statusCode());
+                    if (response.statusCode() != 200) {
+                        System.err.println("[Yeedar] Logout report returned "
+                                + response.statusCode() + ": " + response.body());
+                    }
+                })
+                .exceptionally(throwable -> {
+                    System.err.println("[Yeedar] Logout report error: "
+                            + throwable.getMessage());
                     return null;
                 });
     }
@@ -113,9 +213,7 @@ public class YeetVisClient {
         if (unconfiguredReason() != null) {
             return CompletableFuture.completedFuture(List.of());
         }
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(config.getApiBaseUrl() + "/jalist/defaults"))
-                .header("X-Yeedar-Token", config.getToken())
+        HttpRequest request = AuthedRequest.to(config.getApiBaseUrl() + "/jalist/defaults", config.getToken())
                 .GET()
                 .build();
         return HTTP_CLIENT.sendAsync(request, HttpResponse.BodyHandlers.ofString())
@@ -197,10 +295,8 @@ public class YeetVisClient {
         payload.put("scanned_at", Instant.now().toString());
         payload.put("uploaded_by", config.getUsername());
 
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(baseUrl + "/snitches/jalist"))
+        HttpRequest request = AuthedRequest.to(baseUrl + "/snitches/jalist", token)
                 .header("Content-Type", "application/json")
-                .header("X-Yeedar-Token", token)
                 .POST(HttpRequest.BodyPublishers.ofString(GSON.toJson(payload)))
                 .build();
 
@@ -254,16 +350,18 @@ public class YeetVisClient {
         payload.put("world", world);
         payload.put("chunks", rows);
 
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(config.getApiBaseUrl() + "/terrain"))
+        HttpRequest request = AuthedRequest.to(config.getApiBaseUrl() + "/terrain", config.getToken())
                 .header("Content-Type", "application/json")
-                .header("X-Yeedar-Token", config.getToken())
                 .POST(HttpRequest.BodyPublishers.ofString(GSON.toJson(payload)))
                 .build();
 
         return HTTP_CLIENT.sendAsync(request, HttpResponse.BodyHandlers.ofString())
                 .thenApply(response -> {
                     int status = response.statusCode();
+                    // Terrain uploads are infrequent compared to sightings, but
+                    // still a path a real cutoff can be discovered on, so it
+                    // gets the same treatment as every other upload path.
+                    noteStatus(status);
                     if (status == 200) return true;
                     // 429 is the server's hourly cap and is expected under heavy
                     // exploration; say so plainly rather than as an error.
@@ -323,6 +421,13 @@ public class YeetVisClient {
                     if (response.statusCode() == 200) {
                         uploaded.addAndGet(count);
                         System.out.println("[Yeedar] Uploaded " + count + " snitches: " + response.body());
+                    } else if (response.statusCode() == 426) {
+                        // A permanent answer, not a blip. The backoff ladder
+                        // would spend 2s, 4s and 8s re-asking a question the
+                        // server has already settled, then report it as an
+                        // upload failure rather than as what it is.
+                        noteStatus(response.statusCode());
+                        failed.addAndGet(count);
                     } else {
                         retryOrGiveUp(request, count, attempt,
                                 "HTTP " + response.statusCode() + " " + response.body());
@@ -381,5 +486,30 @@ public class YeetVisClient {
         }
         recentSendTimestamps.addLast(now);
         return true;
+    }
+
+    /**
+     * Notice a 426 and shut uploads down for the session.
+     *
+     * <p>Spoken exactly once. A line that reappears every second is a line
+     * people stop reading, which is the same reasoning UpdateNotifier uses for
+     * its once-per-version rule.
+     */
+    private static void noteStatus(int statusCode) {
+        if (statusCode != 426) return;
+        // compareAndSet, not a read-then-write: a cutoff refuses every
+        // in-flight request at once, so two uploads can each observe a 426 on
+        // their own HttpClient worker thread within microseconds of each
+        // other. Only the thread that actually flips false -> true gets to
+        // speak; the loser sees the CAS fail and returns quietly.
+        if (!versionRejected.compareAndSet(false, true)) return;
+        chat("§cThis version is no longer accepted by YeetVis. "
+                + "§fNothing more will be uploaded this session — "
+                + "update Yeedar and restart to resume: §b" + RELEASES_URL);
+    }
+
+    /** Forget a rejection, so a fresh connection re-checks. */
+    public static void clearVersionRejection() {
+        versionRejected.set(false);
     }
 }

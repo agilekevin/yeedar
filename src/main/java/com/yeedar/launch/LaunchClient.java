@@ -1,12 +1,12 @@
 package com.yeedar.launch;
 
 import com.google.gson.Gson;
+import com.yeedar.api.AuthedRequest;
 import com.yeedar.config.YeedarConfig;
 import com.yeedar.net.EdenServer;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.text.Text;
 
-import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -67,9 +67,7 @@ public final class LaunchClient {
         String body = GSON.toJson(Map.of(
                 "code", code, "thing", thing, "x", x, "z", z));
 
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(config.getApiBaseUrl() + "/strikes"))
-                .header("X-Yeedar-Token", config.getToken())
+        HttpRequest request = AuthedRequest.to(config.getApiBaseUrl() + "/strikes", config.getToken())
                 .header("Content-Type", "application/json")
                 .timeout(Duration.ofSeconds(15))
                 .POST(HttpRequest.BodyPublishers.ofString(body))

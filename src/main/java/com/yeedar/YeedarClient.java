@@ -1,5 +1,6 @@
 package com.yeedar;
 
+import com.yeedar.api.YeetVisClient;
 import com.yeedar.command.YeedarCommands;
 import com.yeedar.config.YeedarConfig;
 import com.yeedar.net.EdenServer;
@@ -7,6 +8,7 @@ import com.yeedar.net.OffEdenNotice;
 import com.yeedar.terrain.TerrainCapture;
 import com.yeedar.tracker.FriendlyTracker;
 import com.yeedar.tracker.JalistScanner;
+import com.yeedar.tracker.LogoutTracker;
 import com.yeedar.tracker.NamelayerListener;
 import com.yeedar.tracker.PlayerTracker;
 import com.yeedar.update.ModVersion;
@@ -47,6 +49,9 @@ public class YeedarClient implements ClientModInitializer {
         // Player tracking tick
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             PlayerTracker.getInstance().tick(client);
+            // Watches the tab list for logouts within range. Separate from
+            // PlayerTracker because it reports a different position entirely.
+            LogoutTracker.getInstance().tick(client);
             // No-op unless a /jalist scan is running.
             JalistScanner.getInstance().tick(client);
             // No-op unless /yeedar mapping is on.
@@ -73,6 +78,12 @@ public class YeedarClient implements ClientModInitializer {
         // beat it; that join is simply quiet and the next one picks it up.
         ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> {
             joinNoticeCountdown = JOIN_NOTICE_DELAY;
+        });
+
+        // A 426 is scoped to the connection that earned it. Clearing here means
+        // updating and rejoining resumes uploads without restarting the game.
+        ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
+            YeetVisClient.clearVersionRejection();
         });
 
         // Watch outgoing commands for /nllm (command string has no leading slash)

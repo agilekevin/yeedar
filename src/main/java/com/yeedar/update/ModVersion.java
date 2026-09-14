@@ -19,6 +19,17 @@ public final class ModVersion {
     public static String current() {
         return FabricLoader.getInstance().getModContainer("yeedar")
                 .map(c -> c.getMetadata().getVersion().getFriendlyString())
-                .orElse("");
+                .orElseGet(() -> {
+                    // A blank version reads to the server as "too old" once a
+                    // minimum is configured — it is indistinguishable from a
+                    // genuinely stale build. That would surface as a confusing
+                    // 426 with nothing in the client to explain it, so the real
+                    // cause (we could not resolve our own version) needs to be
+                    // visible in the logs before it turns into a lockout nobody
+                    // can account for.
+                    System.err.println("[Yeedar] Could not resolve mod version "
+                            + "from metadata; sending blank version header.");
+                    return "";
+                });
     }
 }

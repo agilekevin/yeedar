@@ -20,6 +20,21 @@ public class FriendlyTracker {
 
     private volatile Set<String> friendlyPlayers = Collections.emptySet();
 
+    /**
+     * Whether a real friendly list has ever been loaded.
+     *
+     * <p>An empty {@link #friendlyPlayers} is indistinguishable from "nobody is
+     * friendly" unless something else says otherwise: on a cold launch, or
+     * after any failed refresh, {@link #isFriendly} reads false for everyone,
+     * including allies this client simply hasn't heard about yet. A caller that
+     * treats that as "confirmed not friendly" — as the logout-reporting path
+     * does — would publish an ally's exact position, which is the one thing
+     * this feature must never do. Once true this stays true: a later failed
+     * refresh leaves a stale-but-real list in place, which is a very different
+     * situation from never having had one at all.
+     */
+    private volatile boolean loaded = false;
+
     public static FriendlyTracker getInstance() {
         return INSTANCE;
     }
@@ -30,6 +45,11 @@ public class FriendlyTracker {
 
     public Set<String> getFriendlyPlayers() {
         return friendlyPlayers;
+    }
+
+    /** Whether {@link #isFriendly} has ever reflected a real server response. */
+    public boolean isLoaded() {
+        return loaded;
     }
 
     public void refresh() {
@@ -52,6 +72,7 @@ public class FriendlyTracker {
                             lower.add(name.toLowerCase());
                         }
                         friendlyPlayers = Collections.unmodifiableSet(lower);
+                        loaded = true;
                         System.out.println("[Yeedar] Refreshed friendly list: " + lower.size() + " players");
                     }
                 })
