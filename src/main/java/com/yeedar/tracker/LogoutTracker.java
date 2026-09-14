@@ -8,7 +8,9 @@ import net.minecraft.client.network.AbstractClientPlayerEntity;
 import net.minecraft.client.network.ClientPlayNetworkHandler;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -30,8 +32,25 @@ public final class LogoutTracker {
     private static final int CHECK_INTERVAL = 20; // ticks (1 second)
 
     private final LogoutDetector detector = new LogoutDetector();
+    /** Local-only narration, off unless its marker file exists. Never uploads. */
+    private final LogoutDebug debug = new LogoutDebug();
     private int tickCounter = 0;
     private Object lastWorld = null;
+
+    /**
+     * Which gate stopped a nearby player being reportable, for the debug view.
+     *
+     * <p>Checked in the order that matters to a reader: an unloaded friendly
+     * list is a client-state problem and explains everything else, so it is
+     * named first rather than being masked by a per-player reason.
+     */
+    static String suppressionReason(boolean ignored, boolean friendly,
+                                    boolean friendlyListLoaded) {
+        if (!friendlyListLoaded) return "friendly list not loaded yet";
+        if (friendly) return "friendly";
+        if (ignored) return "ignored name";
+        return "not in range";
+    }
 
     public static LogoutTracker getInstance() {
         return INSTANCE;
@@ -64,6 +83,7 @@ public final class LogoutTracker {
         ClientPlayNetworkHandler network = client.getNetworkHandler();
         if (client.world == null || client.player == null || network == null) {
             detector.reset();
+            debug.reset();
             lastWorld = null;
             return;
         }
@@ -81,6 +101,7 @@ public final class LogoutTracker {
         // nether portal.
         if (lastWorld != client.world) {
             detector.reset();
+            debug.reset();
             lastWorld = client.world;
             return;
         }
@@ -92,12 +113,20 @@ public final class LogoutTracker {
             // Not reporting from here. Drop the baseline too, so coming back
             // does not diff against a tab list from somewhere else entirely.
             detector.reset();
+            debug.reset();
             return;
         }
 
         double range = config.getDetectionRange();
         double rangeSq = range * range;
         FriendlyTracker friendlyTracker = FriendlyTracker.getInstance();
+
+        // Off unless the marker file exists, so the extra bookkeeping below
+        // costs a normal client one stat() per second and nothing else.
+        boolean debugging = debug.isEnabled();
+        debug.announceIfChanged(debugging);
+        List<LogoutDetector.Sighting> nearbyAll = debugging ? new ArrayList<>() : null;
+        Map<String, String> verdicts = debugging ? new HashMap<>() : null;
 
         List<LogoutDetector.Sighting> nearby = new ArrayList<>();
         for (AbstractClientPlayerEntity player : client.world.getPlayers()) {
@@ -108,7 +137,20 @@ public final class LogoutTracker {
             boolean ignored = config.isIgnored(name);
             boolean friendly = friendlyTracker.isFriendly(name);
             boolean friendlyListLoaded = friendlyTracker.isLoaded();
-            if (!isReportable(inRange, ignored, friendly, friendlyListLoaded)) continue;
+            boolean reportable = isReportable(inRange, ignored, friendly, friendlyListLoaded);
+
+            if (debugging && inRange) {
+                // The shadow view sees everyone in range, reportable or not.
+                // Watching an ally come back SUPPRESSED is the only way to
+                // observe the privacy rule holding — otherwise it is
+                // indistinguishable from the feature being broken.
+                nearbyAll.add(new LogoutDetector.Sighting(
+                        player.getUuid(), name, player.getX(), player.getY(), player.getZ()));
+                verdicts.put(name, reportable ? "§awould report"
+                        : "§cSUPPRESSED §7(" + suppressionReason(ignored, friendly, friendlyListLoaded) + ")");
+            }
+
+            if (!reportable) continue;
 
             nearby.add(new LogoutDetector.Sighting(
                     player.getUuid(), name, player.getX(), player.getY(), player.getZ()));
@@ -122,6 +164,13 @@ public final class LogoutTracker {
         for (LogoutDetector.Logout logout : detector.scan(nearby, online)) {
             YeetVisClient.sendLogoutEvent(
                     logout.name(), logout.x(), logout.y(), logout.z());
+        }
+
+        // Last, and on its own detector. Narration must never be able to change
+        // what was uploaded above — it reads the same world and the same tab
+        // list, reaches its own conclusions, and prints them.
+        if (debugging) {
+            debug.scanAndNarrate(nearbyAll, online, verdicts);
         }
     }
 }
