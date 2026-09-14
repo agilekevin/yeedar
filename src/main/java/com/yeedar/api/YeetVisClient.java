@@ -134,8 +134,8 @@ public class YeetVisClient {
             // A dropped sighting is replaced by the next sweep a second later;
             // a dropped logout is gone for good, because the player is. The cap
             // is 5 per 10s, which a busy area can genuinely exhaust.
-            chat("§6[Yeedar] §fRate limited — a logout report for §f"
-                    + playerName + "§f was dropped.");
+            chat("§6Rate limited — a logout report for §f"
+                    + playerName + "§6 was dropped.");
             return;
         }
 
@@ -474,7 +474,7 @@ public class YeetVisClient {
     private static void noteStatus(int statusCode) {
         if (statusCode != 426 || versionRejected) return;
         versionRejected = true;
-        chat("§c[Yeedar] This version is no longer accepted by YeetVis. "
+        chat("§cThis version is no longer accepted by YeetVis. "
                 + "§fNothing more will be uploaded this session — "
                 + "update Yeedar and restart to resume.");
     }
