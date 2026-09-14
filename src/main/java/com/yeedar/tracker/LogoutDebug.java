@@ -7,6 +7,7 @@ import net.minecraft.text.Text;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -45,6 +46,25 @@ public final class LogoutDebug {
 
     /** Last known marker state, so the on/off notice is printed once per flip. */
     private boolean announced = false;
+
+    /**
+     * The tab list as of the previous narrated scan, for transition logging.
+     *
+     * <p>Held here rather than read from {@link LogoutDetector}, which keeps its
+     * own copy private on purpose — this is a diagnostic and has no business
+     * reaching into the class whose correctness it is meant to observe.
+     */
+    private Set<UUID> previousOnline = null;
+
+    /**
+     * Everyone seen nearby this session, so transitions can be narrated for
+     * players we actually care about instead of all ~150 on the server.
+     *
+     * <p>Never pruned. Bounded in practice by how many distinct players come
+     * within detection range in one sitting, which is small; and this only
+     * accumulates at all while the marker file is present.
+     */
+    private final Map<UUID, String> seenNearby = new HashMap<>();
 
     /**
      * Whether the marker file is present right now.
@@ -91,9 +111,17 @@ public final class LogoutDebug {
         }
     }
 
-    /** Forget the baseline. Mirrors the real tracker's reset points. */
+    /**
+     * Forget the baseline. Mirrors the real tracker's reset points.
+     *
+     * <p>The transition baseline goes too. Without that, a reconnect would
+     * narrate every player seen nearby as having LEFT the tab list at once —
+     * which is exactly the false alarm the real path's reset exists to prevent,
+     * and a debug view that fakes it is worse than no debug view.
+     */
     public void reset() {
         shadow.reset();
+        previousOnline = null;
     }
 
     /**
@@ -115,11 +143,43 @@ public final class LogoutDebug {
     public void scanAndNarrate(List<LogoutDetector.Sighting> nearbyAll,
                                Set<UUID> online,
                                Map<String, String> verdicts) {
+        for (LogoutDetector.Sighting s : nearbyAll) {
+            seenNearby.put(s.id(), s.name());
+        }
+        narrateTabTransitions(online);
+
         for (LogoutDetector.Logout logout : shadow.scan(nearbyAll, online)) {
             String verdict = verdicts.getOrDefault(logout.name(), "§7no longer nearby, verdict unknown");
             chat(String.format("§e[Yeedar] logout: §f%s §7at §f%.0f, %.0f, %.0f §7— %s",
                     logout.name(), logout.x(), logout.y(), logout.z(), verdict));
         }
+    }
+
+    /**
+     * Print every tab-list arrival and departure for players seen nearby.
+     *
+     * <p>Added to answer a specific question the logout lines alone could not:
+     * one deliberate log-out produced TWO detections five seconds apart at the
+     * same block. Either the player relogged that fast, or the tab list drops
+     * them, briefly re-adds them, and drops them again — and a detection is
+     * emitted each time, because the detector has no memory of having already
+     * reported someone. These lines show which, by making the underlying
+     * transitions visible instead of only their consequence.
+     *
+     * <p>The total is printed alongside, so a bulk change (a server hiccup
+     * rewriting the whole list) is distinguishable from one player flickering.
+     */
+    private void narrateTabTransitions(Set<UUID> online) {
+        if (previousOnline != null) {
+            for (UUID id : seenNearby.keySet()) {
+                boolean was = previousOnline.contains(id);
+                boolean now = online.contains(id);
+                if (was == now) continue;
+                chat(String.format("§8[Yeedar] tab: §7%s §8%s §8(%d online)",
+                        seenNearby.get(id), now ? "JOINED" : "LEFT", online.size()));
+            }
+        }
+        previousOnline = Set.copyOf(online);
     }
 
     private static void chat(String message) {
